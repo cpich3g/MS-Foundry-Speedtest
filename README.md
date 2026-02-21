@@ -33,6 +33,67 @@ Tests run against **both** the **Completions API** (`chat.completions.create`) a
 
 ---
 
+## 📖 Metric Glossary
+
+### Column Reference (Live Results & Run Tables)
+
+| Column | Meaning |
+|--------|---------|
+| **#** | Sequential run number |
+| **API** | Which API was used — `completions` (cyan) or `responses` (magenta) |
+| **Prompt / Test** | The benchmark prompt set that was used (e.g. "Short (trivial)", "Cache test") |
+| **Stream** | `✓` = streaming mode, `—` = non-streaming (sync) mode |
+| **Mode** | `⇣` = streaming, `●` = sync (compact form used in the live panel) |
+| **TTFT** | **Time to First Token** — time from request sent to first streamed chunk received. Only measured in streaming mode; shows `—` for sync requests |
+| **Total** | **Total Time** — wall-clock duration from request start to final token received |
+| **TPS** | **Tokens Per Second** — `output_tokens / total_time`. Measures generation throughput |
+| **In Tok** | Number of input (prompt) tokens as reported by the API's `usage` object |
+| **Out Tok / Out** | Number of output (completion) tokens generated |
+| **Cached** | Number of prompt tokens served from the server-side prompt cache (`cached_tokens` from usage). `—` or `·` when zero |
+| **Cache** | Same as Cached, compact form in the live panel |
+| **Status** | `✓` (green) = request succeeded · `✗` (red) = request failed with an error |
+
+### Aggregate Statistics
+
+| Stat | Meaning |
+|------|---------|
+| **Runs** | Total number of measured runs (excludes warmup) |
+| **Err%** | Percentage of runs that returned an error |
+| **Mean** | Arithmetic average across all successful runs |
+| **Median / P50** | Middle value — 50th percentile |
+| **P90** | 90th percentile — value below which 90% of runs fall. Represents "worst realistic case" |
+| **P99** | 99th percentile — tail latency |
+| **StdDev** | Standard deviation — measures consistency. Low = stable, high = variable |
+| **Avg In / Avg Out** | Average input and output token counts across runs |
+| **Cache Hit%** | Percentage of runs where `cached_tokens > 0` |
+
+### Cold Start Panel
+
+| Indicator | Meaning |
+|-----------|---------|
+| **1st TTFT** | Time to first token on the very first streaming request. Often higher due to model loading or container cold start |
+| **Avg TTFT (rest)** | Average TTFT of all subsequent streaming requests (after the first) |
+| **Cold Penalty** | `1st TTFT − Avg TTFT (rest)`. Positive = first call was slower. Shown in ms |
+| **▓▓▓ COLD** | Cold penalty > 100 ms — significant cold start detected |
+| **▓▓░ WARMING UP** | Cold penalty 30–100 ms — mild warm-up overhead |
+| **▓░░ HOT** | Cold penalty < 30 ms — endpoint was already warm |
+| **Cache Hit Rate** | Fraction of successful runs where cached tokens were returned |
+| **Cached Tokens** | Total cached tokens across all runs in the session |
+
+### TTFT / TPS Colour Coding
+
+| Colour | TTFT Meaning | TPS Meaning |
+|--------|-------------|-------------|
+| 🟢 **Green** | < 200 ms — fast | > 80 tok/s — fast |
+| 🟡 **Yellow** | 200–500 ms — moderate | 30–80 tok/s — moderate |
+| 🔴 **Red** | > 500 ms — slow | < 30 tok/s — slow |
+
+### Head-to-Head Comparison
+
+When running with `--apis both` (default), a comparison panel shows each metric for Completions vs Responses with the **Winner** highlighted — lower is better for latency metrics, higher is better for throughput.
+
+---
+
 ## 🏗️ Architecture
 
 ```
