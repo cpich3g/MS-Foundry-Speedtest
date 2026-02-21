@@ -304,94 +304,6 @@ def _build_live_results_table(runs: list[SingleRunMetrics], max_rows: int = 12) 
     )
 
 
-def _build_cold_start_panel(all_runs: list[SingleRunMetrics]) -> Panel:
-    """Middle-right: cold start detection and cache analysis."""
-    table = Table(
-        show_lines=False,
-        border_style=DIM_BORDER,
-        padding=(0, 1),
-        expand=True,
-    )
-    table.add_column("Indicator", style="info", min_width=14)
-    table.add_column("Value", justify="right", style="metric", min_width=10)
-
-    successful = [r for r in all_runs if r.success]
-
-    if not successful:
-        table.add_row("[dim]Waiting for data…[/dim]", "")
-        return Panel(table, title="[bold bright_green]🧊 COLD START[/bold bright_green]", border_style=MATRIX_BORDER, padding=(0, 0))
-
-    # --- Cold start detection ---
-    streaming_runs = [r for r in successful if r.streaming and r.time_to_first_token is not None]
-
-    if len(streaming_runs) >= 2:
-        first_ttft = streaming_runs[0].time_to_first_token
-        rest_ttfts = [r.time_to_first_token for r in streaming_runs[1:]]
-        avg_rest_ttft = statistics.mean(rest_ttfts)
-        cold_penalty = first_ttft - avg_rest_ttft
-
-        if cold_penalty > 0.1:
-            indicator = "[error]▓▓▓ COLD[/error]"
-        elif cold_penalty > 0.03:
-            indicator = "[warning]▓▓░ WARM[/warning]"
-        else:
-            indicator = "[good]▓░░ HOT[/good]"
-
-        table.add_row("Cold Start", indicator)
-        table.add_row("1st TTFT", _color_ttft(first_ttft))
-        table.add_row("Avg TTFT (rest)", _color_ttft(avg_rest_ttft))
-        table.add_row("Cold Penalty", _color_delta(cold_penalty, "ms", lower_better=True))
-    else:
-        table.add_row("Cold Start", "[dim]need ≥2 stream runs[/dim]")
-
-    table.add_row("", "")
-
-    # --- Cache stats ---
-    cached_runs = [r for r in successful if r.cached_tokens > 0]
-    total_cached = sum(r.cached_tokens for r in successful)
-    cache_rate = len(cached_runs) / len(successful) if successful else 0
-
-    if total_cached > 0:
-        cache_indicator = f"[good]{cache_rate * 100:.0f}%[/good]" if cache_rate > 0.3 else f"[warning]{cache_rate * 100:.0f}%[/warning]"
-    else:
-        cache_indicator = "[dim]0%[/dim]"
-
-    table.add_row("Cache Hit Rate", cache_indicator)
-    table.add_row("Cached Tokens", f"[metric]{total_cached}[/metric]")
-    table.add_row("Cache Hits", f"{len(cached_runs)}/{len(successful)}")
-
-    table.add_row("", "")
-
-    # --- Running aggregate stats ---
-    all_ttfts = [r.time_to_first_token for r in streaming_runs] if streaming_runs else []
-    all_tps = [r.tokens_per_second for r in successful if r.tokens_per_second > 0]
-    all_totals = [r.total_time for r in successful]
-    errors = sum(1 for r in all_runs if not r.success)
-
-    if all_ttfts:
-        table.add_row("TTFT P50", _fmt_ms(sorted(all_ttfts)[len(all_ttfts) // 2]))
-        if len(all_ttfts) >= 5:
-            table.add_row("TTFT P90", _fmt_ms(sorted(all_ttfts)[int(len(all_ttfts) * 0.9)]))
-
-    if all_tps:
-        table.add_row("TPS Mean", _color_tps(statistics.mean(all_tps)))
-        if len(all_tps) >= 2:
-            table.add_row("TPS StdDev", f"[dim]±{statistics.stdev(all_tps):.1f}[/dim]")
-
-    if all_totals:
-        table.add_row("Avg Total", _fmt_ms(statistics.mean(all_totals)))
-
-    err_str = f"[error]{errors}[/error]" if errors else "[good]0[/good]"
-    table.add_row("Errors", err_str)
-
-    return Panel(
-        table,
-        title="[bold bright_green]🧊 COLD START · CACHE[/bold bright_green]",
-        border_style=MATRIX_BORDER,
-        padding=(0, 0),
-    )
-
-
 def _build_phase_log(phases: list[str]) -> Panel:
     """Bottom: completed phase log with checkmarks."""
     lines = []
@@ -424,20 +336,14 @@ def _build_live_layout(
 
     layout.split_column(
         Layout(name="progress", size=5),
-        Layout(name="body", ratio=1),
+        Layout(name="results", ratio=1),
         Layout(name="phases", size=min(len(completed_phases) + 3, 9)),
-    )
-
-    layout["body"].split_row(
-        Layout(name="results", ratio=3),
-        Layout(name="sidebar", ratio=1, minimum_size=30),
     )
 
     layout["progress"].update(
         _build_progress_panel(progress, current_phase, completed, total, start_time)
     )
     layout["results"].update(_build_live_results_table(all_runs))
-    layout["sidebar"].update(_build_cold_start_panel(all_runs))
     layout["phases"].update(_build_phase_log(completed_phases))
 
     return layout
