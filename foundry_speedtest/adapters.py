@@ -10,6 +10,7 @@ from dotenv import load_dotenv
 from openai import OpenAI
 from azure.identity import DefaultAzureCredential, get_bearer_token_provider
 
+from .config import ModelCapabilities
 from .metrics import SingleRunMetrics
 
 # ---------------------------------------------------------------------------
@@ -59,27 +60,34 @@ def run_completions(
 ) -> SingleRunMetrics:
     """Execute a single Completions API call and return metrics."""
     client = _get_client()
+    caps = ModelCapabilities.for_model(model)
     metrics = SingleRunMetrics(
         api_type="completions",
         prompt_label="",
         streaming=stream,
     )
 
+    # o-series and gpt-5 use "developer" role instead of "system"
     messages = [
-        {"role": "system", "content": system},
+        {"role": caps.system_role, "content": system},
         {"role": "user", "content": user},
     ]
+
+    # o-series doesn't support streaming on some models; honour caps
+    if not caps.supports_streaming and stream:
+        stream = False
+        metrics.streaming = False
 
     wall_start = time.perf_counter()
 
     try:
         if stream:
             metrics = _completions_streaming(
-                client, model, messages, max_tokens, temperature, timeout, metrics, wall_start
+                client, model, messages, max_tokens, temperature, timeout, metrics, wall_start, caps
             )
         else:
             metrics = _completions_non_streaming(
-                client, model, messages, max_tokens, temperature, timeout, metrics, wall_start
+                client, model, messages, max_tokens, temperature, timeout, metrics, wall_start, caps
             )
     except Exception as exc:
         metrics.total_time = time.perf_counter() - wall_start
@@ -99,19 +107,23 @@ def _completions_streaming(
     timeout: float,
     metrics: SingleRunMetrics,
     wall_start: float,
+    caps: ModelCapabilities,
 ) -> SingleRunMetrics:
     first_token_received = False
     output_text_chunks: list[str] = []
 
-    response_stream = client.chat.completions.create(
+    kwargs: dict = dict(
         model=model,
         messages=messages,
         max_completion_tokens=max_tokens,
-        temperature=temperature,
         stream=True,
         stream_options={"include_usage": True},
         timeout=timeout,
     )
+    if caps.supports_temperature:
+        kwargs["temperature"] = temperature
+
+    response_stream = client.chat.completions.create(**kwargs)
 
     for chunk in response_stream:
         if not first_token_received and chunk.choices and chunk.choices[0].delta.content:
@@ -156,15 +168,19 @@ def _completions_non_streaming(
     timeout: float,
     metrics: SingleRunMetrics,
     wall_start: float,
+    caps: ModelCapabilities,
 ) -> SingleRunMetrics:
-    response = client.chat.completions.create(
+    kwargs: dict = dict(
         model=model,
         messages=messages,
         max_completion_tokens=max_tokens,
-        temperature=temperature,
         stream=False,
         timeout=timeout,
     )
+    if caps.supports_temperature:
+        kwargs["temperature"] = temperature
+
+    response = client.chat.completions.create(**kwargs)
 
     metrics.total_time = time.perf_counter() - wall_start
     metrics.end_to_end_latency = metrics.total_time
@@ -209,22 +225,28 @@ def run_responses(
 ) -> SingleRunMetrics:
     """Execute a single Responses API call and return metrics."""
     client = _get_client()
+    caps = ModelCapabilities.for_model(model)
     metrics = SingleRunMetrics(
         api_type="responses",
         prompt_label="",
         streaming=stream,
     )
 
+    # o-series doesn't support streaming on some models
+    if not caps.supports_streaming and stream:
+        stream = False
+        metrics.streaming = False
+
     wall_start = time.perf_counter()
 
     try:
         if stream:
             metrics = _responses_streaming(
-                client, model, system, user, max_tokens, temperature, timeout, metrics, wall_start
+                client, model, system, user, max_tokens, temperature, timeout, metrics, wall_start, caps
             )
         else:
             metrics = _responses_non_streaming(
-                client, model, system, user, max_tokens, temperature, timeout, metrics, wall_start
+                client, model, system, user, max_tokens, temperature, timeout, metrics, wall_start, caps
             )
     except Exception as exc:
         metrics.total_time = time.perf_counter() - wall_start
@@ -245,18 +267,22 @@ def _responses_streaming(
     timeout: float,
     metrics: SingleRunMetrics,
     wall_start: float,
+    caps: ModelCapabilities,
 ) -> SingleRunMetrics:
     first_token_received = False
 
-    response_stream = client.responses.create(
+    kwargs: dict = dict(
         model=model,
         instructions=system,
         input=user,
         max_output_tokens=max_tokens,
-        temperature=temperature,
         stream=True,
         timeout=timeout,
     )
+    if caps.supports_temperature:
+        kwargs["temperature"] = temperature
+
+    response_stream = client.responses.create(**kwargs)
 
     for event in response_stream:
         event_type = event.type if hasattr(event, "type") else ""
@@ -297,16 +323,20 @@ def _responses_non_streaming(
     timeout: float,
     metrics: SingleRunMetrics,
     wall_start: float,
+    caps: ModelCapabilities,
 ) -> SingleRunMetrics:
-    response = client.responses.create(
+    kwargs: dict = dict(
         model=model,
         instructions=system,
         input=user,
         max_output_tokens=max_tokens,
-        temperature=temperature,
         stream=False,
         timeout=timeout,
     )
+    if caps.supports_temperature:
+        kwargs["temperature"] = temperature
+
+    response = client.responses.create(**kwargs)
 
     metrics.total_time = time.perf_counter() - wall_start
     metrics.end_to_end_latency = metrics.total_time

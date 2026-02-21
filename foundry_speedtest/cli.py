@@ -38,7 +38,7 @@ from rich.text import Text
 from rich.theme import Theme
 
 from .benchmarks import benchmark_cache, benchmark_concurrency, benchmark_prompt
-from .config import BENCHMARK_PROMPTS, BenchmarkConfig
+from .config import BENCHMARK_PROMPTS, BenchmarkConfig, ModelCapabilities
 from .metrics import AggregateMetrics, SingleRunMetrics
 from .reporter import export_csv, export_json, export_raw_csv
 
@@ -724,10 +724,18 @@ class FoundrySpeedTest:
         config_table = Table(show_lines=False, border_style=MATRIX_BORDER, padding=(0, 1), expand=True)
         config_table.add_column("Parameter", style="info")
         config_table.add_column("Value", style="metric")
+
+        caps = ModelCapabilities.for_model(model)
+        temp_str = str(temperature) if caps.supports_temperature else "[dim]n/a (reasoning model)[/dim]"
+        stream_str = "✓" if caps.supports_streaming else "[warning]limited[/warning]"
+        role_str = caps.system_role
+
         for k, v in [
-            ("Model", model), ("APIs", apis), ("Iterations", str(iterations)),
+            ("Model", model), ("Model Family", f"{role_str} role · temp={'yes' if caps.supports_temperature else 'no'}"),
+            ("APIs", apis), ("Iterations", str(iterations)),
             ("Warmup", str(warmup)), ("Max Tokens", str(max_tokens)),
-            ("Temperature", str(temperature)), ("Concurrency", str(concurrency)),
+            ("Temperature", temp_str), ("Streaming", stream_str),
+            ("Concurrency", str(concurrency)),
             ("Cache Rounds", str(cache_rounds)), ("Prompts", ", ".join(cfg.prompt_keys)),
         ]:
             config_table.add_row(k, v)

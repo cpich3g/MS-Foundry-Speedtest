@@ -1,6 +1,57 @@
 """Configuration, prompt sets, and constants for benchmarking."""
 
+from __future__ import annotations
+
+import re
 from dataclasses import dataclass, field
+
+
+# ---------------------------------------------------------------------------
+# Model family detection — controls which API params are safe to send
+# ---------------------------------------------------------------------------
+
+def _is_o_series(model: str) -> bool:
+    """Return True for reasoning models: o1, o1-mini, o1-preview, o3, o3-mini, o3-pro, o4-mini, etc."""
+    m = model.lower()
+    return bool(re.match(r"^o[0-9]", m))
+
+
+def _is_gpt5(model: str) -> bool:
+    """Return True for GPT-5 family models."""
+    return model.lower().startswith("gpt-5")
+
+
+@dataclass
+class ModelCapabilities:
+    """What a model family supports — drives parameter selection."""
+    supports_temperature: bool = True
+    supports_streaming: bool = True
+    system_role: str = "system"       # "system" or "developer"
+    max_tokens_key: str = "max_completion_tokens"  # param name for token limit
+
+    @staticmethod
+    def for_model(model: str) -> "ModelCapabilities":
+        if _is_o_series(model):
+            return ModelCapabilities(
+                supports_temperature=False,
+                supports_streaming=True,   # o3/o4 series support streaming; o1 may not but API returns clear error
+                system_role="developer",
+                max_tokens_key="max_completion_tokens",
+            )
+        if _is_gpt5(model):
+            return ModelCapabilities(
+                supports_temperature=True,
+                supports_streaming=True,
+                system_role="developer",
+                max_tokens_key="max_completion_tokens",
+            )
+        # GPT-4.1, GPT-4o, GPT-4, etc.
+        return ModelCapabilities(
+            supports_temperature=True,
+            supports_streaming=True,
+            system_role="system",
+            max_tokens_key="max_completion_tokens",
+        )
 
 # ---------------------------------------------------------------------------
 # Prompt catalogue — diverse lengths & domains to stress-test fairly
