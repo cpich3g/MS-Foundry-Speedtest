@@ -1,0 +1,23 @@
+[project]
+name = "foundry-speedtest"
+version = "0.1.0"
+description = "CLI-based comprehensive speed testing for models on Microsoft Foundry"
+requires-python = ">=3.10"
+dependencies = [
+    "openai>=1.60.0",
+    "azure-identity>=1.15.0",
+    "python-dotenv>=1.0.0",
+    "rich>=13.7.0",
+    "fire>=0.6.0",
+    "numpy>=1.26.0",
+]
+
+[project.scripts]
+foundry-speedtest = "foundry_speedtest.cli:main"
+
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["foundry_speedtest*"]

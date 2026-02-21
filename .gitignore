@@ -1,0 +1,41 @@
+# ─── Python ───────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+*.whl
+
+# ─── Virtual Environments ────────────────────────────────
+.venv/
+venv/
+ENV/
+env/
+
+# ─── Environment / Secrets ───────────────────────────────
+.env
+.env.*
+!.env.example
+
+# ─── IDE ─────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# ─── OS ──────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# ─── Benchmark Results (local only) ─────────────────────
+results/
+
+# ─── Misc ────────────────────────────────────────────────
+*.log
+*.bak
+*.tmp

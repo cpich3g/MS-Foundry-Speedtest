@@ -1,0 +1,68 @@
+%%{ init: { 'theme': 'dark', 'themeVariables': { 'primaryColor': '#00ff00', 'lineColor': '#00ff00' } } }%%
+
+graph TB
+    subgraph CLI["🖥️ CLI Layer (Fire + Rich)"]
+        direction LR
+        BENCH["bench\nFull Suite"]
+        QUICK["quick\nConnectivity Check"]
+        COMPARE["compare\nModel vs Model"]
+        LIST["list_prompts\nPrompt Catalogue"]
+    end
+
+    subgraph ENGINE["⚡ Benchmark Engine"]
+        direction TB
+        BP["benchmark_prompt\nPer-prompt iterations\n+ warmup"]
+        BC["benchmark_cache\nRepeated identical prompts\nwarm/cold detection"]
+        BCON["benchmark_concurrency\nThreadPool parallel requests\nthroughput measurement"]
+    end
+
+    subgraph ADAPTERS["🔌 API Adapters"]
+        direction LR
+        COMP["Completions API\nchat.completions.create\nStreaming + Sync"]
+        RESP["Responses API\nresponses.create\nStreaming + Sync"]
+    end
+
+    subgraph METRICS["📊 Metrics Collection"]
+        direction LR
+        SINGLE["SingleRunMetrics\nTTFT, Total Time, TPS\nTokens, Cache, Errors"]
+        AGG["AggregateMetrics\nP50/P90/P99 percentiles\nMean, Median, Stdev"]
+    end
+
+    subgraph REPORTING["📁 Reporter"]
+        direction LR
+        JSON["JSON Export\nFull structured results"]
+        CSV["CSV Summary\nAggregate stats per test"]
+        RAW["CSV Raw Log\nEvery individual API call"]
+    end
+
+    subgraph CONFIG["⚙️ Configuration"]
+        direction LR
+        PROMPTS["Prompt Catalogue\n5 diverse prompt types"]
+        BCFG["BenchmarkConfig\nModel, iterations, tokens\nconcurrency, temperature"]
+    end
+
+    subgraph AZURE["☁️ Azure AI Foundry"]
+        direction LR
+        ENDPOINT["OpenAI-compatible\nEndpoint"]
+        AUTH["DefaultAzureCredential\nEntra ID / Token Provider"]
+    end
+
+    CLI --> ENGINE
+    ENGINE --> ADAPTERS
+    ADAPTERS --> METRICS
+    ENGINE --> METRICS
+    METRICS --> AGG
+    AGG --> REPORTING
+    AGG --> CLI
+    CONFIG --> ENGINE
+    CONFIG --> ADAPTERS
+    ADAPTERS --> AZURE
+    AUTH --> ADAPTERS
+
+    style CLI fill:#001a00,stroke:#00ff00,color:#00ff00
+    style ENGINE fill:#001a00,stroke:#00ff00,color:#00ff00
+    style ADAPTERS fill:#001a00,stroke:#00ff00,color:#00ff00
+    style METRICS fill:#001a00,stroke:#00ff00,color:#00ff00
+    style REPORTING fill:#001a00,stroke:#00ff00,color:#00ff00
+    style CONFIG fill:#001a00,stroke:#00ff00,color:#00ff00
+    style AZURE fill:#000d1a,stroke:#00aaff,color:#00aaff
