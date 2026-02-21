@@ -557,6 +557,38 @@ def _build_comparison_panel(
     return Panel(table, border_style=MATRIX_BORDER)
 
 
+def _build_error_summary(error_runs: list[SingleRunMetrics]) -> Panel:
+    """Show unique error messages with counts so failures aren't silently hidden."""
+    # Group by error message
+    error_counts: dict[str, int] = {}
+    for r in error_runs:
+        msg = r.error or "Unknown error"
+        # Truncate long error messages for readability
+        if len(msg) > 200:
+            msg = msg[:200] + "…"
+        error_counts[msg] = error_counts.get(msg, 0) + 1
+
+    table = Table(
+        title="⚠ ERROR DETAILS",
+        title_style=Style(color="bright_red", bold=True),
+        border_style=Style(color="red"),
+        show_lines=True,
+        padding=(0, 1),
+    )
+    table.add_column("Count", justify="right", style="bold bright_red", width=6)
+    table.add_column("Error", style="bright_red", min_width=40)
+
+    for msg, count in sorted(error_counts.items(), key=lambda x: -x[1]):
+        table.add_row(str(count), msg)
+
+    note = Text.from_markup(
+        f"\n  [dim red]{len(error_runs)} of {len(error_runs)} failed requests shown. "
+        "Check model deployment name, API compatibility, and parameter support.[/dim red]"
+    )
+    content = Group(table, note)
+    return Panel(content, border_style=Style(color="red"))
+
+
 def _build_variability_panel(
     variability_results: list[tuple[VariabilityResult, VariabilityResult]],
 ) -> Panel:
@@ -827,6 +859,12 @@ class FoundrySpeedTest:
 
         console.print(_build_cold_start_summary(all_runs))
         console.print()
+
+        # Error details (if any failures)
+        error_runs = [r for r in all_runs if not r.success and r.error]
+        if error_runs:
+            console.print(_build_error_summary(error_runs))
+            console.print()
 
         if apis == "both":
             c_aggs = [a for a in all_aggregates if a.api_type == "completions"]

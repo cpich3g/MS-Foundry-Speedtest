@@ -40,7 +40,7 @@ class ModelCapabilities:
             )
         if _is_gpt5(model):
             return ModelCapabilities(
-                supports_temperature=True,
+                supports_temperature=False,
                 supports_streaming=True,
                 system_role="developer",
                 max_tokens_key="max_completion_tokens",
