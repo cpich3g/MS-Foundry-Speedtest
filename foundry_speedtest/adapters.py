@@ -197,9 +197,7 @@ def _completions_non_streaming(
     if response.choices:
         metrics.finish_reason = response.choices[0].finish_reason or ""
 
-    if response.output_tokens and metrics.total_time > 0:
-        metrics.tokens_per_second = response.usage.completion_tokens / metrics.total_time
-    elif metrics.output_tokens and metrics.total_time > 0:
+    if metrics.output_tokens and metrics.total_time > 0:
         metrics.tokens_per_second = metrics.output_tokens / metrics.total_time
 
     metrics.model_id = response.model or ""
