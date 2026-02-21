@@ -11,6 +11,7 @@ Usage:
 
 from __future__ import annotations
 
+import math
 import statistics
 import time
 from datetime import datetime, timezone
@@ -75,19 +76,83 @@ MATRIX_BORDER = Style(color="green")
 MATRIX_TITLE = Style(color="bright_green", bold=True)
 DIM_BORDER = Style(color="grey37")
 
-BANNER = r"""[bright_green]
- ██████╗ ██████╗ ██╗   ██╗███╗   ██╗██████╗ ██████╗ ██╗   ██╗
- ██╔═══╝ ██╔══██╗██║   ██║████╗  ██║██╔══██╗██╔══██╗╚██╗ ██╔╝
- █████╗  ██║  ██║██║   ██║██╔██╗ ██║██║  ██║██████╔╝ ╚████╔╝
- ██╔══╝  ██║  ██║██║   ██║██║╚██╗██║██║  ██║██╔══██╗  ╚██╔╝
- ██║     ██████╔╝╚██████╔╝██║ ╚████║██████╔╝██║  ██║   ██║
- ╚═╝     ╚═════╝  ╚═════╝ ╚═╝  ╚═══╝╚═════╝ ╚═╝  ╚═╝   ╚═╝
-[/bright_green][bold bright_green]  ░▒▓ S P E E D T E S T  ·  A z u r e  A I  F o u n d r y ▓▒░[/bold bright_green]
-"""
+_BANNER_LINES = [
+    r" ██████╗ ██████╗ ██╗   ██╗███╗   ██╗██████╗ ██████╗ ██╗   ██╗",
+    r" ██╔═══╝ ██╔══██╗██║   ██║████╗  ██║██╔══██╗██╔══██╗╚██╗ ██╔╝",
+    r" █████╗  ██║  ██║██║   ██║██╔██╗ ██║██║  ██║██████╔╝ ╚████╔╝ ",
+    r" ██╔══╝  ██║  ██║██║   ██║██║╚██╗██║██║  ██║██╔══██╗  ╚██╔╝  ",
+    r" ██║     ██████╔╝╚██████╔╝██║ ╚████║██████╔╝██║  ██║   ██║   ",
+    r" ╚═╝     ╚═════╝  ╚═════╝ ╚═╝  ╚═══╝╚═════╝ ╚═╝  ╚═╝   ╚═╝   ",
+]
+_SUBTITLE = "  ░▒▓ S P E E D T E S T  ·  A z u r e  A I  F o u n d r y ▓▒░"
+
+# Colour palette for the wave animation (dark → highlight → dark)
+_WAVE_COLORS = [
+    "grey23",        # 0 — nearly invisible
+    "green4",        # 1
+    "green",         # 2
+    "bright_green",  # 3
+    "bold bright_white",  # 4 — peak highlight
+    "bright_green",  # 3
+    "green",         # 2
+    "green4",        # 1
+]
+_WAVE_WIDTH = len(_WAVE_COLORS)
+
+
+def _wave_frame(lines: list[str], tick: int) -> Text:
+    """Build one frame of the colour-wave animation across banner characters."""
+    max_cols = max(len(ln) for ln in lines)
+    frame = Text()
+    for row_idx, line in enumerate(lines):
+        for col_idx, ch in enumerate(line):
+            # Wave position: diagonal sweep (left-to-right + slight row offset)
+            dist = (col_idx - tick + row_idx * 2) % (max_cols + _WAVE_WIDTH * 2)
+            if 0 <= dist < _WAVE_WIDTH:
+                colour = _WAVE_COLORS[dist]
+            else:
+                colour = "green"  # default body colour
+            # Spaces stay unstyled to avoid background flicker
+            if ch == " ":
+                frame.append(ch)
+            else:
+                frame.append(ch, style=colour)
+        frame.append("\n")
+    return frame
 
 
 def _show_banner():
-    console.print(BANNER)
+    """Animated banner: a bright pulse sweeps across the FOUNDRY text."""
+    max_cols = max(len(ln) for ln in _BANNER_LINES)
+    total_sweep = max_cols + _WAVE_WIDTH * 3  # full width pass
+    frames = 28  # number of animation frames
+    frame_delay = 0.035  # seconds between frames
+
+    with Live(console=console, refresh_per_second=60, transient=True) as live:
+        for f in range(frames):
+            tick = int(f * total_sweep / frames)
+            banner_text = _wave_frame(_BANNER_LINES, tick)
+            # Subtitle pulses in sync — bright at peak, dim otherwise
+            sub_brightness = 0.5 + 0.5 * math.sin(f * math.pi / frames)
+            if sub_brightness > 0.8:
+                sub_style = "bold bright_white"
+            elif sub_brightness > 0.5:
+                sub_style = "bold bright_green"
+            else:
+                sub_style = "green"
+            subtitle = Text(_SUBTITLE, style=sub_style)
+
+            content = Group(banner_text, subtitle)
+            live.update(content)
+            time.sleep(frame_delay)
+
+    # Print the final static banner so it stays on screen
+    console.print(Text.from_markup(
+        "[bright_green]"
+        + "\n".join(_BANNER_LINES)
+        + "[/bright_green]"
+    ))
+    console.print(Text(_SUBTITLE, style="bold bright_green"))
     console.print()
 
 
