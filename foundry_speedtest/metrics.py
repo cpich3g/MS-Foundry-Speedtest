@@ -42,6 +42,9 @@ class SingleRunMetrics:
     finish_reason: str = ""
     system_fingerprint: str = ""
 
+    # Response text (populated for variability tests)
+    response_text: str = ""
+
 
 @dataclass
 class AggregateMetrics:

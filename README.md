@@ -80,6 +80,27 @@ Tests run against **both** the **Completions API** (`chat.completions.create`) a
 | **Cache Hit Rate** | Fraction of successful runs where cached tokens were returned |
 | **Cached Tokens** | Total cached tokens across all runs in the session |
 
+### Variability / Determinism Panel
+
+| Column | Meaning |
+|--------|--------|
+| **API** | Which API was tested |
+| **Mode** | `No seed` = baseline variability test · `seed=42` = reproducible output mode |
+| **Runs** | Number of successful identical requests made |
+| **Avg Similarity** | Mean pairwise text similarity across all output pairs (0–100%). Uses Python `SequenceMatcher` |
+| **Min / Max Similarity** | Lowest and highest pairwise similarity observed |
+| **Fingerprint Consistent** | `✓` = all `system_fingerprint` values matched · `✗ differs` = backend config changed between calls |
+| **Verdict** | Determinism classification based on average similarity |
+
+| Verdict | Avg Similarity | Meaning |
+|---------|---------------|--------|
+| **✓ Deterministic** | ≥ 95% | Outputs are essentially identical across runs |
+| **≈ Mostly deterministic** | 75–95% | Outputs share most content but diverge in phrasing |
+| **~ Semi-variable** | 50–75% | Noticeable differences; common themes but different wording |
+| **✗ Non-deterministic** | < 50% | Each output is substantially different |
+
+> **Note:** Per [Azure docs](https://learn.microsoft.com/en-us/azure/ai-foundry/openai/how-to/reproducible-output), determinism is not guaranteed even with `seed`. Larger `max_tokens` values produce less deterministic results. The `system_fingerprint` tracks backend configuration changes that can affect reproducibility.
+
 ### TTFT / TPS Colour Coding
 
 | Colour | TTFT Meaning | TPS Meaning |
@@ -305,6 +326,7 @@ Results are saved to the `results/` directory:
 | **Reasoning** | ✓ | ✓ | Multi-step logic → reasoning latency |
 | **Cache warm/cold** | ✓ | — | Identical prompt repeated N times |
 | **Concurrency** | — | ✓ | Parallel requests for throughput |
+| **Variability** | — | ✓ | Determinism test: with and without `seed` |
 
 ---
 

@@ -57,6 +57,7 @@ def run_completions(
     max_tokens: int = 512,
     temperature: float = 0.7,
     timeout: float = 120.0,
+    seed: int | None = None,
 ) -> SingleRunMetrics:
     """Execute a single Completions API call and return metrics."""
     client = _get_client()
@@ -83,11 +84,11 @@ def run_completions(
     try:
         if stream:
             metrics = _completions_streaming(
-                client, model, messages, max_tokens, temperature, timeout, metrics, wall_start, caps
+                client, model, messages, max_tokens, temperature, timeout, metrics, wall_start, caps, seed=seed
             )
         else:
             metrics = _completions_non_streaming(
-                client, model, messages, max_tokens, temperature, timeout, metrics, wall_start, caps
+                client, model, messages, max_tokens, temperature, timeout, metrics, wall_start, caps, seed=seed
             )
     except Exception as exc:
         metrics.total_time = time.perf_counter() - wall_start
@@ -108,6 +109,8 @@ def _completions_streaming(
     metrics: SingleRunMetrics,
     wall_start: float,
     caps: ModelCapabilities,
+    *,
+    seed: int | None = None,
 ) -> SingleRunMetrics:
     first_token_received = False
     output_text_chunks: list[str] = []
@@ -122,6 +125,8 @@ def _completions_streaming(
     )
     if caps.supports_temperature:
         kwargs["temperature"] = temperature
+    if seed is not None:
+        kwargs["seed"] = seed
 
     response_stream = client.chat.completions.create(**kwargs)
 
@@ -153,6 +158,7 @@ def _completions_streaming(
 
     metrics.total_time = time.perf_counter() - wall_start
     metrics.end_to_end_latency = metrics.total_time
+    metrics.response_text = "".join(output_text_chunks)
     if metrics.output_tokens and metrics.total_time > 0:
         metrics.tokens_per_second = metrics.output_tokens / metrics.total_time
     metrics.success = True
@@ -169,6 +175,8 @@ def _completions_non_streaming(
     metrics: SingleRunMetrics,
     wall_start: float,
     caps: ModelCapabilities,
+    *,
+    seed: int | None = None,
 ) -> SingleRunMetrics:
     kwargs: dict = dict(
         model=model,
@@ -179,6 +187,8 @@ def _completions_non_streaming(
     )
     if caps.supports_temperature:
         kwargs["temperature"] = temperature
+    if seed is not None:
+        kwargs["seed"] = seed
 
     response = client.chat.completions.create(**kwargs)
 
@@ -196,6 +206,7 @@ def _completions_non_streaming(
 
     if response.choices:
         metrics.finish_reason = response.choices[0].finish_reason or ""
+        metrics.response_text = response.choices[0].message.content or ""
 
     if metrics.output_tokens and metrics.total_time > 0:
         metrics.tokens_per_second = metrics.output_tokens / metrics.total_time
@@ -220,6 +231,7 @@ def run_responses(
     max_tokens: int = 512,
     temperature: float = 0.7,
     timeout: float = 120.0,
+    seed: int | None = None,
 ) -> SingleRunMetrics:
     """Execute a single Responses API call and return metrics."""
     client = _get_client()
@@ -240,11 +252,11 @@ def run_responses(
     try:
         if stream:
             metrics = _responses_streaming(
-                client, model, system, user, max_tokens, temperature, timeout, metrics, wall_start, caps
+                client, model, system, user, max_tokens, temperature, timeout, metrics, wall_start, caps, seed=seed
             )
         else:
             metrics = _responses_non_streaming(
-                client, model, system, user, max_tokens, temperature, timeout, metrics, wall_start, caps
+                client, model, system, user, max_tokens, temperature, timeout, metrics, wall_start, caps, seed=seed
             )
     except Exception as exc:
         metrics.total_time = time.perf_counter() - wall_start
@@ -266,8 +278,11 @@ def _responses_streaming(
     metrics: SingleRunMetrics,
     wall_start: float,
     caps: ModelCapabilities,
+    *,
+    seed: int | None = None,
 ) -> SingleRunMetrics:
     first_token_received = False
+    output_text_chunks: list[str] = []
 
     kwargs: dict = dict(
         model=model,
@@ -279,6 +294,8 @@ def _responses_streaming(
     )
     if caps.supports_temperature:
         kwargs["temperature"] = temperature
+    if seed is not None:
+        kwargs["seed"] = seed
 
     response_stream = client.responses.create(**kwargs)
 
@@ -289,6 +306,9 @@ def _responses_streaming(
         if not first_token_received and event_type == "response.output_text.delta":
             metrics.time_to_first_token = time.perf_counter() - wall_start
             first_token_received = True
+
+        if event_type == "response.output_text.delta" and hasattr(event, "delta"):
+            output_text_chunks.append(event.delta)
 
         # Final completed event carries usage
         if event_type == "response.completed" and hasattr(event, "response"):
@@ -305,6 +325,7 @@ def _responses_streaming(
 
     metrics.total_time = time.perf_counter() - wall_start
     metrics.end_to_end_latency = metrics.total_time
+    metrics.response_text = "".join(output_text_chunks)
     if metrics.output_tokens and metrics.total_time > 0:
         metrics.tokens_per_second = metrics.output_tokens / metrics.total_time
     metrics.success = True
@@ -322,6 +343,8 @@ def _responses_non_streaming(
     metrics: SingleRunMetrics,
     wall_start: float,
     caps: ModelCapabilities,
+    *,
+    seed: int | None = None,
 ) -> SingleRunMetrics:
     kwargs: dict = dict(
         model=model,
@@ -333,6 +356,8 @@ def _responses_non_streaming(
     )
     if caps.supports_temperature:
         kwargs["temperature"] = temperature
+    if seed is not None:
+        kwargs["seed"] = seed
 
     response = client.responses.create(**kwargs)
 
@@ -350,6 +375,14 @@ def _responses_non_streaming(
 
     if metrics.output_tokens and metrics.total_time > 0:
         metrics.tokens_per_second = metrics.output_tokens / metrics.total_time
+
+    # Extract response text from the responses API output
+    if hasattr(response, "output") and response.output:
+        for item in response.output:
+            if hasattr(item, "content") and item.content:
+                for part in item.content:
+                    if hasattr(part, "text"):
+                        metrics.response_text += part.text
 
     metrics.model_id = getattr(response, "model", "") or ""
     metrics.success = True

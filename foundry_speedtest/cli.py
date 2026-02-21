@@ -37,7 +37,7 @@ from rich.table import Table
 from rich.text import Text
 from rich.theme import Theme
 
-from .benchmarks import benchmark_cache, benchmark_concurrency, benchmark_prompt
+from .benchmarks import benchmark_cache, benchmark_concurrency, benchmark_prompt, benchmark_variability, VariabilityResult
 from .config import BENCHMARK_PROMPTS, BenchmarkConfig, ModelCapabilities
 from .metrics import AggregateMetrics, SingleRunMetrics
 from .reporter import export_csv, export_json, export_raw_csv
@@ -557,6 +557,72 @@ def _build_comparison_panel(
     return Panel(table, border_style=MATRIX_BORDER)
 
 
+def _build_variability_panel(
+    variability_results: list[tuple[VariabilityResult, VariabilityResult]],
+) -> Panel:
+    """Build the variability / determinism test results panel."""
+    table = Table(
+        title="🎲 VARIABILITY / DETERMINISM TEST",
+        title_style=MATRIX_TITLE,
+        border_style=MATRIX_BORDER,
+        show_lines=True,
+        padding=(0, 1),
+    )
+    table.add_column("API", style="info", width=12)
+    table.add_column("Mode", style="dim", width=12)
+    table.add_column("Runs", justify="right", width=5)
+    table.add_column("Avg\nSimilarity", justify="right", width=10)
+    table.add_column("Min\nSimilarity", justify="right", width=10)
+    table.add_column("Max\nSimilarity", justify="right", width=10)
+    table.add_column("Fingerprint\nConsistent", justify="center", width=12)
+    table.add_column("Verdict", justify="center", width=20)
+
+    for unseeded, seeded in variability_results:
+        for vr in (unseeded, seeded):
+            mode = f"seed={vr.seed}" if vr.seeded else "No seed"
+            ok_runs = sum(1 for r in vr.runs if r.success)
+
+            avg_sim = vr.avg_similarity
+            if avg_sim >= 0.95:
+                sim_color = "good"
+            elif avg_sim >= 0.75:
+                sim_color = "warning"
+            else:
+                sim_color = "error"
+
+            fp_str = "[good]✓[/good]" if vr.fingerprint_consistent else "[warning]✗ differs[/warning]"
+
+            verdict = vr.verdict
+            if verdict == "Deterministic":
+                verdict_str = "[good]✓ Deterministic[/good]"
+            elif verdict == "Mostly deterministic":
+                verdict_str = "[info]≈ Mostly deterministic[/info]"
+            elif verdict == "Semi-variable":
+                verdict_str = "[warning]~ Semi-variable[/warning]"
+            else:
+                verdict_str = "[error]✗ Non-deterministic[/error]"
+
+            table.add_row(
+                _api_tag(vr.api_type),
+                mode,
+                str(ok_runs),
+                f"[{sim_color}]{avg_sim:.1%}[/{sim_color}]",
+                f"[{sim_color}]{vr.min_similarity:.1%}[/{sim_color}]" if vr.pairwise_similarities else "[dim]—[/dim]",
+                f"[{sim_color}]{vr.max_similarity:.1%}[/{sim_color}]" if vr.pairwise_similarities else "[dim]—[/dim]",
+                fp_str,
+                verdict_str,
+            )
+
+    # Add explanatory note
+    note = Text.from_markup(
+        "\n  [dim]Similarity = pairwise text comparison (SequenceMatcher) across N identical requests.[/dim]\n"
+        "  [dim]Seed mode uses seed=42 per Azure reproducible output guidance. Determinism is not guaranteed.[/dim]"
+    )
+
+    content = Group(table, note)
+    return Panel(content, border_style=MATRIX_BORDER)
+
+
 # ---------------------------------------------------------------------------
 # CLI commands
 # ---------------------------------------------------------------------------
@@ -617,10 +683,12 @@ class FoundrySpeedTest:
         prompt_tests = len(cfg.prompt_keys) * len(api_list) * 2  # stream + non-stream
         cache_tests = len(api_list)
         concurrency_tests = len(api_list)
-        total_tasks = prompt_tests + cache_tests + concurrency_tests
+        variability_tests = len(api_list)
+        total_tasks = prompt_tests + cache_tests + concurrency_tests + variability_tests
 
         all_aggregates: list[AggregateMetrics] = []
         all_runs: list[SingleRunMetrics] = []
+        variability_results: list[tuple[VariabilityResult, VariabilityResult]] = []
         completed_phases: list[str] = []
         completed_count = 0
         current_phase = "Initializing…"
@@ -727,6 +795,20 @@ class FoundrySpeedTest:
                 completed_phases.append(f"{_api_tag(api_type)} Concurrency x{concurrency}")
                 _refresh()
 
+            # 4) Variability / determinism tests
+            for api_type in api_list:
+                current_phase = f"{api_type} · Variability (seed test)"
+                _refresh()
+
+                unseeded, seeded = benchmark_variability(api_type, cfg)
+                variability_results.append((unseeded, seeded))
+                # Add runs to the live display
+                all_runs.extend(unseeded.runs)
+                all_runs.extend(seeded.runs)
+                completed_count += 1
+                completed_phases.append(f"{_api_tag(api_type)} Variability / determinism")
+                _refresh()
+
             current_phase = "✓ All benchmarks complete"
             progress.update(master_task, description=current_phase, completed=total_tasks)
             _refresh()
@@ -750,6 +832,11 @@ class FoundrySpeedTest:
             c_aggs = [a for a in all_aggregates if a.api_type == "completions"]
             r_aggs = [a for a in all_aggregates if a.api_type == "responses"]
             console.print(_build_comparison_panel(c_aggs, r_aggs))
+            console.print()
+
+        # Variability results
+        if variability_results:
+            console.print(_build_variability_panel(variability_results))
             console.print()
 
         # --- Export ---

@@ -195,6 +195,16 @@ CACHE_TEST_PROMPT = {
 }
 
 
+# Prompt used for variability / reproducibility testing.
+# Short max_tokens keeps outputs comparable; same prompt is sent N times
+# with and without a seed to measure determinism.
+VARIABILITY_PROMPT = {
+    "system": "You are a helpful assistant.",
+    "user": "Tell me a story about how the universe began?",
+    "label": "Variability test",
+}
+
+
 @dataclass
 class BenchmarkConfig:
     """Runtime configuration for a benchmark session."""
@@ -208,4 +218,7 @@ class BenchmarkConfig:
     prompt_keys: list[str] = field(default_factory=lambda: list(BENCHMARK_PROMPTS.keys()))
     stream: bool = True
     cache_rounds: int = 5
+    variability_rounds: int = 3
+    variability_seed: int = 42
+    variability_max_tokens: int = 50
     timeout: float = 120.0
