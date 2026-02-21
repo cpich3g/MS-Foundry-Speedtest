@@ -1,1 +1,1 @@
-"""Foundry SpeedTest — CLI benchmark suite for Azure AI Foundry models."""
+"""Foundry SpeedTest — CLI benchmark suite for Microsoft Foundry models."""

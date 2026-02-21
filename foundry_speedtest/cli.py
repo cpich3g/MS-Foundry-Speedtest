@@ -84,7 +84,7 @@ _BANNER_LINES = [
     r" ██║     ██████╔╝╚██████╔╝██║ ╚████║██████╔╝██║  ██║   ██║   ",
     r" ╚═╝     ╚═════╝  ╚═════╝ ╚═╝  ╚═══╝╚═════╝ ╚═╝  ╚═╝   ╚═╝   ",
 ]
-_SUBTITLE = "  ░▒▓ S P E E D T E S T  ·  A z u r e  A I  F o u n d r y ▓▒░"
+_SUBTITLE = "  ░▒▓ S P E E D T E S T  ·  M i c r o s o f t  F o u n d r y ▓▒░"
 
 # Colour palette for the wave animation (dark → highlight → dark)
 _WAVE_COLORS = [
@@ -629,7 +629,7 @@ def _build_variability_panel(
 
 
 class FoundrySpeedTest:
-    """🔥 Foundry SpeedTest — benchmark Azure AI Foundry models at the speed of light."""
+    """🔥 Foundry SpeedTest — benchmark Microsoft Foundry models at the speed of light."""
 
     def bench(
         self,

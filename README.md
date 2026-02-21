@@ -1,6 +1,6 @@
 # ⚡ Foundry SpeedTest
 
-> **Matrix-themed CLI benchmark suite for Azure AI Foundry models**
+> **Matrix-themed CLI benchmark suite for Microsoft Foundry models**
 >
 > Compare **Completions API** vs **Responses API** head-to-head with real latency metrics, throughput analysis, and cache behaviour testing — all from your terminal.
 
@@ -138,7 +138,7 @@ When running with `--apis both` (default), a comparison panel shows each metric 
 └────────────────┼───────────────────┼─────────────────────────┘
                  │                   │
 ┌────────────────▼───────────────────▼─────────────────────────┐
-│              Azure AI Foundry Endpoint                        │
+│              Microsoft Foundry Endpoint                       │
 │         (OpenAI-compatible  ·  Entra ID Auth)                 │
 └──────────────────────────────────────────────────────────────┘
 
@@ -188,7 +188,7 @@ Foundry-SpeedTest/
 ### Prerequisites
 
 - **Python 3.10+**
-- **Azure AI Foundry** resource with a deployed model
+- **Microsoft Foundry** resource with a deployed model
 - **Azure CLI** logged in (`az login`) — used for Entra ID authentication
 
 ### 1. Clone & Setup
