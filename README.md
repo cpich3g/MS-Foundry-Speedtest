@@ -101,6 +101,23 @@ Tests run against **both** the **Completions API** (`chat.completions.create`) a
 
 > **Note:** Per [Azure docs](https://learn.microsoft.com/en-us/azure/ai-foundry/openai/how-to/reproducible-output), determinism is not guaranteed even with `seed`. Larger `max_tokens` values produce less deterministic results. The `system_fingerprint` tracks backend configuration changes that can affect reproducibility.
 
+### Slow Runs Tracker (🐢)
+
+Appears after the aggregate statistics when **any** successful run exceeds the 1-second threshold:
+
+| Column | Meaning |
+|--------|---------|
+| **#** | Run number (matches the "All Runs" table) |
+| **API** | `completions` or `responses` |
+| **Test** | Prompt / test name |
+| **Stream** | `✓` streaming, `—` sync |
+| **TTFT** | Time to First Token for that run |
+| **Total** | Total wall-clock time for that run |
+| **TPS** | Tokens per second |
+| **Flags** | Which threshold was breached — `TTFT > 1s`, `Total > 1s`, or both |
+
+> This panel helps pinpoint individual outlier runs that drag up your P90/P99 numbers — useful for identifying cold starts, throttling, or network blips.
+
 ### TTFT / TPS Colour Coding
 
 | Colour | TTFT Meaning | TPS Meaning |

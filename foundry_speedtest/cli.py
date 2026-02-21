@@ -441,6 +441,65 @@ def _build_summary_table(aggregates: list[AggregateMetrics], title: str) -> Tabl
     return table
 
 
+def _build_slow_runs_panel(all_runs: list[SingleRunMetrics], ttft_threshold: float = 1.0, total_threshold: float = 1.0) -> Panel | None:
+    """Flag runs where TTFT or Total Time exceeded the threshold (default 1s)."""
+    slow = []
+    for i, r in enumerate(all_runs, 1):
+        if not r.success:
+            continue
+        slow_ttft = r.time_to_first_token is not None and r.time_to_first_token > ttft_threshold
+        slow_total = r.total_time > total_threshold
+        if slow_ttft or slow_total:
+            slow.append((i, r, slow_ttft, slow_total))
+
+    if not slow:
+        return None
+
+    table = Table(
+        title="🐢 SLOW RUNS (> 1 s)",
+        title_style=Style(color="bright_yellow", bold=True),
+        border_style=Style(color="yellow"),
+        show_lines=True,
+        padding=(0, 1),
+    )
+    table.add_column("#", justify="right", style="dim", width=4)
+    table.add_column("API", width=12)
+    table.add_column("Test", style="dim", min_width=16, max_width=24)
+    table.add_column("Stream", justify="center", width=6)
+    table.add_column("TTFT", justify="right", width=10)
+    table.add_column("Total", justify="right", width=10)
+    table.add_column("TPS", justify="right", width=8)
+    table.add_column("Flags", width=20)
+
+    for idx, r, slow_ttft, slow_total in slow:
+        flags = []
+        if slow_ttft:
+            flags.append("[bold bright_red]TTFT > 1s[/bold bright_red]")
+        if slow_total:
+            flags.append("[bold bright_red]Total > 1s[/bold bright_red]")
+
+        ttft_str = _color_ttft(r.time_to_first_token) if r.time_to_first_token else "[dim]—[/dim]"
+        total_ms = r.total_time * 1000
+        total_str = f"[error]{total_ms:.0f}ms[/error]" if slow_total else f"{total_ms:.0f}ms"
+
+        table.add_row(
+            str(idx),
+            _api_tag(r.api_type),
+            r.prompt_label[:24],
+            "✓" if r.streaming else "—",
+            ttft_str,
+            total_str,
+            _color_tps(r.tokens_per_second),
+            " · ".join(flags),
+        )
+
+    note = Text.from_markup(
+        f"\n  [dim yellow]{len(slow)} of {sum(1 for r in all_runs if r.success)} successful runs exceeded 1 s threshold.[/dim yellow]"
+    )
+    content = Group(table, note)
+    return Panel(content, border_style=Style(color="yellow"))
+
+
 def _build_cold_start_summary(all_runs: list[SingleRunMetrics]) -> Panel:
     """Final cold-start analysis with per-API breakdown."""
     table = Table(
@@ -856,6 +915,12 @@ class FoundrySpeedTest:
 
         console.print(_build_summary_table(all_aggregates, f"📈 AGGREGATE STATISTICS — {model}"))
         console.print()
+
+        # Slow runs tracker
+        slow_panel = _build_slow_runs_panel(all_runs)
+        if slow_panel:
+            console.print(slow_panel)
+            console.print()
 
         console.print(_build_cold_start_summary(all_runs))
         console.print()
