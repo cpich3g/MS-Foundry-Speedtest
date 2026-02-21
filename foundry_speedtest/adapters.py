@@ -294,8 +294,7 @@ def _responses_streaming(
     )
     if caps.supports_temperature:
         kwargs["temperature"] = temperature
-    if seed is not None:
-        kwargs["seed"] = seed
+    # Note: Responses API does not support the 'seed' parameter
 
     response_stream = client.responses.create(**kwargs)
 
@@ -356,8 +355,7 @@ def _responses_non_streaming(
     )
     if caps.supports_temperature:
         kwargs["temperature"] = temperature
-    if seed is not None:
-        kwargs["seed"] = seed
+    # Note: Responses API does not support the 'seed' parameter
 
     response = client.responses.create(**kwargs)
 
