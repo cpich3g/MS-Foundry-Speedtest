@@ -33,6 +33,7 @@ class ModelCapabilities:
     supports_streaming: bool = True
     system_role: str = "system"       # "system" or "developer"
     max_tokens_key: str = "max_completion_tokens"  # param name for token limit
+    supports_responses_api: bool = True
 
     @staticmethod
     def for_model(model: str) -> "ModelCapabilities":

@@ -234,7 +234,6 @@ def run_responses(
     seed: int | None = None,
 ) -> SingleRunMetrics:
     """Execute a single Responses API call and return metrics."""
-    client = _get_client()
     caps = ModelCapabilities.for_model(model)
     metrics = SingleRunMetrics(
         api_type="responses",
@@ -242,6 +241,7 @@ def run_responses(
         streaming=stream,
     )
 
+    client = _get_client()
     # o-series doesn't support streaming on some models
     if not caps.supports_streaming and stream:
         stream = False
