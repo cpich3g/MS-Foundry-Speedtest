@@ -7,6 +7,9 @@
 
 ## Learnings
 
+- Per user directive (2026-05-13), all models on ai-justinjoy-4099 officially support the Responses API. The `supports_responses_api=False` guard was a workaround for a transient service-side failure and has been removed. If HTTP 500s resurface on a specific model, re-introduce a targeted capability override rather than a broad guard.
+
+
 - The benchmark adapters read `ModelCapabilities.for_model()` to decide which parameters are safe to send per model family.
 - `gpt-chat-latest` previously rejected `temperature=0.7` with a 400 and succeeds on Chat Completions when temperature is omitted/defaulted.
 - The Responses API path for `gpt-chat-latest` (version `2026-05-05`, resource `ai-justinjoy-4099`) returns HTTP 500 consistently. **Root cause: service-side Foundry backend failure, not a request-shape issue.**
@@ -79,4 +82,24 @@ Three parts, none involving hardcoded secrets:
 3. **Guard bypass in `run_responses()`** (medium-risk, needs team sign-off): Check `APIM_FOUNDRY_ENDPOINT` before applying the `supports_responses_api` gate. If an APIM client is available, skip the guard and use it. The guard was evidence-based on the direct endpoint; the APIM backend may behave differently. Live probe required before committing.
 
 **Decision:** Not implementing the adapters.py change — it requires a live APIM probe to confirm the endpoint works for `gpt-chat-latest` and team consensus on the guard bypass. Filed as decision inbox entry `bishop-apim-responses-endpoint.md`.
+
+---
+
+### Benchmark: gpt-chat-latest vs gpt-4.1 and gpt-5.4-mini (2026-05-13)
+
+**Resource:** ai-justinjoy-4099 (swedencentral) | **Iterations:** 3
+
+**gpt-chat-latest vs gpt-4.1 — gpt-chat-latest wins all metrics:**
+- TTFT Mean: 1224ms vs 1435ms
+- Total Time Mean: 4753ms vs 4889ms
+- TPS Mean: 54.7 vs 50.2
+
+**gpt-chat-latest vs gpt-5.4-mini — gpt-5.4-mini wins all metrics:**
+- TTFT Mean: 1344ms vs 1295ms
+- Total Time Mean: 4644ms vs 2997ms (gpt-5.4-mini ~35% faster)
+- TPS Mean: 55.3 vs 85.3 (gpt-5.4-mini ~54% higher throughput)
+
+**Guard behavior confirmed correct:** gpt-chat-latest Responses API rows all show 100% error rate with 0 tokens and no latency metrics — the `supports_responses_api=False` early-exit is firing cleanly before any HTTP call, producing clean benchmark output. Completions rows show real valid data for gpt-chat-latest throughout.
+
+**Takeaway:** gpt-chat-latest is on par with gpt-4.1 for latency-sensitive completions workloads and is measurably faster. It is outpaced by gpt-5.4-mini on throughput, as expected for a mini-tier model. Decision filed: `.squad/decisions/inbox/bishop-gpt-chat-latest-benchmark.md`.
 
