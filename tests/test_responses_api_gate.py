@@ -1,16 +1,12 @@
 """
-Unit tests for ModelCapabilities.supports_responses_api gate.
+Unit tests for ModelCapabilities.supports_responses_api flag.
 
-These are deterministic (no live calls). They lock down the logic that
-prevents gpt-chat-latest from burning tokens on a guaranteed HTTP 500
-from the Foundry Responses API backend.
+These are deterministic (no live calls). They lock down capability detection
+logic so parameter-selection regressions are caught before hitting the API.
 
-Evidence from live probe (2026-05-13, resource ai-justinjoy-4099, swedencentral):
-  - Responses API returns HTTP 500 for gpt-chat-latest on ALL request shapes:
-      bare input only, with instructions, streaming, non-streaming.
-  - Chat Completions works normally for gpt-chat-latest.
-  - Responses API works for gpt-4.1 (control).
-  - Request IDs on file: ba9746e5-..., 3017221e-..., 2ca5641f-...
+Note (2026-05-13): gpt-chat-latest previously had supports_responses_api=False
+due to HTTP 500 failures on Foundry. That guard was removed after the user
+confirmed all models now support the Responses API.
 """
 import pytest
 
@@ -18,13 +14,13 @@ from foundry_speedtest.config import ModelCapabilities, _uses_default_temperatur
 
 
 class TestResponsesApiGate:
-    """ModelCapabilities.supports_responses_api must be False for chat-latest models."""
+    """ModelCapabilities.supports_responses_api must be True for all supported models."""
 
-    def test_gpt_chat_latest_responses_api_disabled(self):
+    def test_gpt_chat_latest_responses_api_enabled(self):
         caps = ModelCapabilities.for_model("gpt-chat-latest")
-        assert caps.supports_responses_api is False, (
-            "gpt-chat-latest must have supports_responses_api=False — "
-            "service returns HTTP 500 on Foundry (all request shapes, confirmed live)"
+        assert caps.supports_responses_api is True, (
+            "gpt-chat-latest must have supports_responses_api=True — "
+            "all models confirmed to support Responses API"
         )
 
     def test_gpt_5_chat_latest_responses_api_not_blocked_by_code(self):
@@ -63,21 +59,27 @@ class TestResponsesApiGate:
         assert _uses_default_temperature_only("gpt-4o") is False
 
 
-class TestRunResponsesGuard:
-    """run_responses must return fail-fast metrics without making an API call for blocked models."""
+class TestRunResponsesNoGuard:
+    """run_responses must attempt an API call for all models (no early-exit guard)."""
 
-    def test_run_responses_returns_fail_without_api_call(self, monkeypatch):
-        """run_responses for gpt-chat-latest must return failure without touching the client."""
+    def test_run_responses_attempts_api_call_for_gpt_chat_latest(self, monkeypatch):
+        """run_responses for gpt-chat-latest must call the client — guard was removed."""
         import foundry_speedtest.adapters as adapters
 
         called = []
 
+        class FakeResponses:
+            def create(self, **kwargs):
+                called.append(kwargs)
+                raise RuntimeError("fake-api-error")
+
+        class FakeClient:
+            responses = FakeResponses()
+
         def fake_get_client():
-            called.append(True)
-            raise AssertionError("Client must NOT be created for unsupported models")
+            return FakeClient()
 
         monkeypatch.setattr(adapters, "_get_client", fake_get_client)
-        # Reset cached client so our patch takes effect
         adapters._client = None
 
         metrics = adapters.run_responses(
@@ -86,6 +88,6 @@ class TestRunResponsesGuard:
             user="Hello",
         )
 
-        assert metrics.success is False
-        assert not called, "API client was created despite supports_responses_api=False"
-        assert "Responses API is not available" in metrics.error or "service-side" in metrics.error.lower() or "HTTP 500" in metrics.error
+        assert called, "run_responses must call client.responses.create for gpt-chat-latest"
+        assert metrics.success is False  # fake error propagates
+        assert "fake-api-error" in metrics.error

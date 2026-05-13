@@ -33,12 +33,6 @@ class ModelCapabilities:
     supports_streaming: bool = True
     system_role: str = "system"       # "system" or "developer"
     max_tokens_key: str = "max_completion_tokens"  # param name for token limit
-    # Known Foundry-side limitation: gpt-chat-latest returns HTTP 500 on the
-    # Responses API backend despite Chat Completions working.  Microsoft docs
-    # list the model as supported, so this is a service-side deployment gap
-    # (confirmed via live probes — request IDs on file in bishop history).
-    # Set False here so callers can skip the Responses path rather than burning
-    # tokens on guaranteed failures.
     supports_responses_api: bool = True
 
     @staticmethod
@@ -63,10 +57,6 @@ class ModelCapabilities:
                 supports_streaming=True,
                 system_role="system",
                 max_tokens_key="max_completion_tokens",
-                # Confirmed via live probe: Responses API returns HTTP 500 for
-                # gpt-chat-latest on Foundry even though docs list it as
-                # supported.  Chat Completions succeeds; this is service-side.
-                supports_responses_api=False,
             )
         # GPT-4.1, GPT-4o, GPT-4, etc.
         return ModelCapabilities(

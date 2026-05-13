@@ -241,22 +241,6 @@ def run_responses(
         streaming=stream,
     )
 
-    # Known Foundry service-side limitation: some deployments advertise Responses
-    # API support in Microsoft docs but return HTTP 500 from the inference backend.
-    # Confirmed via live probe for gpt-chat-latest (version 2026-05-05) on resource
-    # ai-justinjoy-4099 — Chat Completions succeeds; Responses API fails at the
-    # backend after session creation.  Skip the call and surface a clear diagnostic
-    # rather than burning tokens and returning a generic server_error.
-    if not caps.supports_responses_api:
-        metrics.success = False
-        metrics.error = (
-            f"Responses API is not available for '{model}' on this Foundry deployment "
-            "(service-side HTTP 500 confirmed). Chat Completions works normally. "
-            "This is a Microsoft Foundry backend limitation, not a request-shape issue. "
-            "File an Azure support request or wait for a service update."
-        )
-        return metrics
-
     client = _get_client()
     # o-series doesn't support streaming on some models
     if not caps.supports_streaming and stream:
