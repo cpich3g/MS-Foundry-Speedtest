@@ -6,7 +6,16 @@
 
 **Date:** 2026-05-13  
 **Authors:** Bishop, Hicks  
-**Status:** Implemented — awaiting Microsoft resolution  
+**Status:** Implemented — awaiting Microsoft resolution
+
+#### Benchmark Notes (2026-05-13)
+
+Bishop benchmarked `gpt-chat-latest` against `gpt-4.1` and `gpt-5.4-mini` with 3 iterations per model per prompt size on resource `ai-justinjoy-4099` (swedencentral). Key findings:
+
+- **vs gpt-4.1:** gpt-chat-latest wins all three metrics (TTFT: 1224ms vs 1435ms, Total Time: 4753ms vs 4889ms, TPS: 54.7 vs 50.2).
+- **vs gpt-5.4-mini:** gpt-5.4-mini wins all three metrics (expected for mini-tier: 35% faster total time, 54% higher TPS).
+- **Guard correctness:** All 6 gpt-chat-latest Responses API rows (across both compares) show 100% error rate, 0 tokens, no latency metrics — correct guarded behavior. No HTTP 500s surfaced; guard is working cleanly.
+- **Takeaway:** gpt-chat-latest is on par with gpt-4.1 for completions latency and faster; outclassed by gpt-5.4-mini on throughput.
 
 #### Summary
 
@@ -37,7 +46,38 @@ The failure is service-side (not a request-shape issue). Tried: bare input, with
 
 Remove `supports_responses_api=False` from `_uses_default_temperature_only` branch in `foundry_speedtest/config.py` once Microsoft confirms Responses API is functional. Retest with raw curl probe before removing.
 
-### Decision: APIM Project Endpoint Support for Responses API
+### Decision: Deployment Name Failures + Endpoint Configuration (2026-05-13)
+
+**Date:** 2026-05-13  
+**Author:** Hicks  
+**Requested by:** JJ  
+**Status:** Findings for team review
+
+#### Findings
+
+1. **Requested deployments do not exist:**
+   - `gpt-5.5` → 404 DeploymentNotFound
+   - `opus-4.7` → 404 DeploymentNotFound (no Anthropic/Claude deployed on resource)
+
+2. **Suggested mappings:**
+   - `gpt-5.5` → use `gpt-5.4` (highest gpt-5.x with working chat completions)
+   - `opus-4.7` → no equivalent (consider `grok-4` or `o3-pro` if non-OpenAI flagship intended)
+
+3. **Endpoint configuration finding (critical):**
+   - `AZURE_FOUNDRY_ENDPOINT` without `/openai/v1` suffix causes 100% error rate (wrong URL construction).
+   - Correct form: `https://ai-justinjoy-4099.cognitiveservices.azure.com/openai/v1`
+   - **Recommendation:** Update `.env.example` and docs to show `/openai/v1` suffix. Consider adding endpoint validation check in `_get_client()`.
+
+4. **Substitute benchmark results (gpt-5.4 vs gpt-5.4-mini, 3 iterations, 0% error):**
+   - TTFT Mean: 1417ms vs 883ms → gpt-5.4-mini wins
+   - Total Time Mean: 5857ms vs 2709ms → gpt-5.4-mini wins (~2× faster)
+   - TPS Mean: 41.9 vs 94.0 → gpt-5.4-mini wins (~2.2× higher throughput)
+
+#### Actions for JJ
+
+1. Confirm intended model for `opus-4.7` (no Anthropic option available).
+2. Update `AZURE_FOUNDRY_ENDPOINT` to include `/openai/v1` suffix.
+3. Re-run `gpt-5.5` comparison when deployment becomes available.
 
 **Date:** 2026-05-13  
 **Author:** Bishop  
