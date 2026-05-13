@@ -1059,11 +1059,16 @@ class FoundrySpeedTest:
             v1 = _global_avg(all_aggs[model1], attr, sub)
             v2 = _global_avg(all_aggs[model2], attr, sub)
             fmt = _fmt_ms if attr in ("ttft", "total_time") else _fmt_tps
-            if lower:
+            if not v1 or not v2:
+                # One model produced no data - can't determine a meaningful winner.
+                winner_cell = "[dim]—[/dim]"
+            elif lower:
                 w = model1 if v1 <= v2 else model2
+                winner_cell = f"[good]{w}[/good]"
             else:
                 w = model1 if v1 >= v2 else model2
-            cmp_table.add_row(label, fmt(v1), fmt(v2), f"[good]{w}[/good]")
+                winner_cell = f"[good]{w}[/good]"
+            cmp_table.add_row(label, fmt(v1), fmt(v2), winner_cell)
 
         console.print(Panel(cmp_table, border_style=MATRIX_BORDER))
         console.print()
