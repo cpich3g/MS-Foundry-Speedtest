@@ -32,3 +32,51 @@
 
 **Recommended next step:** File an Azure support ticket referencing the above request IDs, or wait for a service update. When the service is fixed, remove the `supports_responses_api=False` override from `_uses_default_temperature_only` branch in `config.py`.
 
+---
+
+### Investigation: APIM Project Endpoint for Responses API (2026-05-13)
+
+**Context:** JJ provided an APIM Responses endpoint:
+`https://apim-yiaefkyinmgwy.azure-api.net/ai-justinjoy-4099/api/projects/ai-justinjoy-4099-project/openai/v1/responses`
+Task: determine `base_url` mapping, why the `gpt-chat-latest` guard blocks this path, and the minimal safe integration proposal.
+
+**Finding 1 — `base_url` mapping:**
+The OpenAI Python SDK's `client.responses.create()` appends `/responses` to `base_url`. Therefore `base_url` must end at `/openai/v1`:
+```
+APIM_FOUNDRY_ENDPOINT=https://apim-yiaefkyinmgwy.azure-api.net/ai-justinjoy-4099/api/projects/ai-justinjoy-4099-project/openai/v1
+```
+The SDK constructs the full URL as `{base_url}/responses`, matching the APIM endpoint exactly. This is the correct form; **do not** pass the full `/responses` path as `base_url`.
+
+**Finding 2 — Authentication mismatch:**
+The current `_get_client()` passes an Azure AD bearer token (via `DefaultAzureCredential`) as `api_key`. APIM subscription keys are separate credentials — unless the APIM policy is explicitly configured for AAD passthrough, the Azure AD token will be rejected (401). The APIM key must be supplied via a new env var (`APIM_API_KEY`) as the `api_key` argument to `OpenAI(...)`. This is a secret; never hardcode.
+
+**Finding 3 — Why the guard blocks `gpt-chat-latest` before the APIM endpoint is tried:**
+`ModelCapabilities.for_model("gpt-chat-latest")` hits the `_uses_default_temperature_only` branch (exact string match, case-insensitive) and returns `supports_responses_api=False`.
+In `run_responses()` (adapters.py L250–258), the guard fires immediately after `ModelCapabilities.for_model()` — before `_get_client()` is even called (L260). The guard is **endpoint-agnostic**: it was coded based on evidence from the direct Foundry endpoint (`ai-justinjoy-4099.openai.azure.com`). The APIM project endpoint routes through `/projects/ai-justinjoy-4099-project/`, a different path that may route to a different inference backend. The guard will silently block any APIM probe for `gpt-chat-latest` without making a call.
+
+**Finding 4 — Minimal safe integration proposal (not yet implemented):**
+Three parts, none involving hardcoded secrets:
+
+1. **New env vars** (`.env.example` update is safe/non-secret):
+   - `APIM_FOUNDRY_ENDPOINT` — the base URL above (URL only, not a secret)
+   - `APIM_API_KEY` — APIM subscription key (secret, env var only)
+
+2. **New client factory** in `adapters.py` (low-risk, purely additive):
+   ```python
+   _apim_client: OpenAI | None = None
+   
+   def _get_apim_client() -> OpenAI | None:
+       global _apim_client
+       if _apim_client is None:
+           endpoint = os.getenv("APIM_FOUNDRY_ENDPOINT")
+           api_key = os.getenv("APIM_API_KEY")
+           if not endpoint or not api_key:
+               return None
+           _apim_client = OpenAI(base_url=endpoint, api_key=api_key)
+       return _apim_client
+   ```
+
+3. **Guard bypass in `run_responses()`** (medium-risk, needs team sign-off): Check `APIM_FOUNDRY_ENDPOINT` before applying the `supports_responses_api` gate. If an APIM client is available, skip the guard and use it. The guard was evidence-based on the direct endpoint; the APIM backend may behave differently. Live probe required before committing.
+
+**Decision:** Not implementing the adapters.py change — it requires a live APIM probe to confirm the endpoint works for `gpt-chat-latest` and team consensus on the guard bypass. Filed as decision inbox entry `bishop-apim-responses-endpoint.md`.
+
