@@ -21,6 +21,11 @@ def _is_gpt5(model: str) -> bool:
     return model.lower().startswith("gpt-5")
 
 
+def _uses_default_temperature_only(model: str) -> bool:
+    """Return True for chat-latest deployments that reject custom temperature."""
+    return model.lower() in {"gpt-chat-latest", "gpt-5-chat-latest"}
+
+
 @dataclass
 class ModelCapabilities:
     """What a model family supports — drives parameter selection."""
@@ -43,6 +48,13 @@ class ModelCapabilities:
                 supports_temperature=False,
                 supports_streaming=True,
                 system_role="developer",
+                max_tokens_key="max_completion_tokens",
+            )
+        if _uses_default_temperature_only(model):
+            return ModelCapabilities(
+                supports_temperature=False,
+                supports_streaming=True,
+                system_role="system",
                 max_tokens_key="max_completion_tokens",
             )
         # GPT-4.1, GPT-4o, GPT-4, etc.
