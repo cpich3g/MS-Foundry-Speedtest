@@ -37,6 +37,98 @@ The failure is service-side (not a request-shape issue). Tried: bare input, with
 
 Remove `supports_responses_api=False` from `_uses_default_temperature_only` branch in `foundry_speedtest/config.py` once Microsoft confirms Responses API is functional. Retest with raw curl probe before removing.
 
+### Decision: APIM Project Endpoint Support for Responses API
+
+**Date:** 2026-05-13  
+**Author:** Bishop  
+**Status:** Proposed — awaiting live probe and team sign-off  
+**Requested by:** JJ
+
+#### Context
+
+JJ provided an APIM Responses endpoint with two questions: (1) how to wire this into the OpenAI SDK `base_url`, and (2) whether the existing `gpt-chat-latest` Responses API guard correctly applies to this new endpoint.
+
+#### Findings
+
+**1. `base_url` — use `/openai/v1`, not the full path**
+
+The OpenAI Python SDK constructs endpoint URL as `{base_url}/{operation}`.
+- `client.responses.create()` → `{base_url}/responses`
+- `client.chat.completions.create()` → `{base_url}/chat/completions`
+
+**Correct `base_url`:**
+```
+https://apim-yiaefkyinmgwy.azure-api.net/ai-justinjoy-4099/api/projects/ai-justinjoy-4099-project/openai/v1
+```
+
+**2. Authentication: Azure AD token ≠ APIM subscription key**
+
+Current `_get_client()` passes Azure AD bearer token (from `DefaultAzureCredential`) as `api_key`. APIM subscription keys are separate. Unless explicitly configured for Azure AD passthrough, this returns HTTP 401. APIM key must be:
+- Stored as env var `APIM_API_KEY` (never hardcoded)
+- Passed as `api_key=` when constructing APIM `OpenAI(...)` client
+
+**3. The `gpt-chat-latest` guard blocks before APIM is ever tried**
+
+In `run_responses()` (adapters.py L250–258), the guard fires before `_get_client()` (L260). Guard is endpoint-agnostic — empirically based on direct Foundry endpoint (`ai-justinjoy-4099.openai.azure.com`). APIM project endpoint uses path `/projects/ai-justinjoy-4099-project/`, routing through different backend. Guard incorrectly prevents APIM probe from running.
+
+#### Proposed Code Changes
+
+**Non-secret, low-risk: update `.env.example`**
+```dotenv
+# Optional: APIM project endpoint (URL only — not a secret)
+APIM_FOUNDRY_ENDPOINT=https://apim-yiaefkyinmgwy.azure-api.net/ai-justinjoy-4099/api/projects/ai-justinjoy-4099-project/openai/v1
+
+# Optional: APIM subscription key (SECRET — env var only, never commit)
+APIM_API_KEY=
+```
+
+**Additive, low-risk: new APIM client factory in `adapters.py`**
+```python
+_apim_client: OpenAI | None = None
+
+def _get_apim_client() -> OpenAI | None:
+    global _apim_client
+    if _apim_client is None:
+        endpoint = os.getenv("APIM_FOUNDRY_ENDPOINT")
+        api_key = os.getenv("APIM_API_KEY")
+        if not endpoint or not api_key:
+            return None
+        _apim_client = OpenAI(base_url=endpoint, api_key=api_key)
+    return _apim_client
+
+def reset_apim_client() -> None:
+    global _apim_client
+    _apim_client = None
+```
+
+**Medium-risk: guard bypass in `run_responses()` — needs live probe first**
+```python
+def run_responses(model, system, user, ...) -> SingleRunMetrics:
+    caps = ModelCapabilities.for_model(model)
+    metrics = SingleRunMetrics(api_type="responses", ...)
+
+    apim_client = _get_apim_client()
+
+    # Only apply guard when NOT using APIM endpoint
+    if not caps.supports_responses_api and apim_client is None:
+        metrics.success = False
+        metrics.error = "Responses API not available for this model..."
+        return metrics
+
+    client = apim_client if apim_client is not None else _get_client()
+    ...
+```
+
+#### Prerequisites Before Implementing Guard Bypass
+
+1. **Live probe** against APIM endpoint with minimal `gpt-chat-latest` Responses API call — must confirm HTTP 200, not 500.
+2. **Auth verification** — confirm APIM expects subscription key or Azure AD passthrough.
+3. **Team sign-off** on guard bypass logic.
+
+#### Reverting
+
+If APIM endpoint also returns HTTP 500 for `gpt-chat-latest`, guard bypass is unnecessary. Keep behavior unchanged and log as confirmed dead path.
+
 ## Governance
 
 - All meaningful changes require team consensus
