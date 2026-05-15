@@ -76,11 +76,12 @@ class TestRunResponsesNoGuard:
         class FakeClient:
             responses = FakeResponses()
 
-        def fake_get_client():
+        def fake_get_responses_client():
             return FakeClient()
 
-        monkeypatch.setattr(adapters, "_get_client", fake_get_client)
+        monkeypatch.setattr(adapters, "_get_responses_client", fake_get_responses_client)
         adapters._client = None
+        adapters._responses_client = None
 
         metrics = adapters.run_responses(
             model="gpt-chat-latest",
@@ -91,3 +92,56 @@ class TestRunResponsesNoGuard:
         assert called, "run_responses must call client.responses.create for gpt-chat-latest"
         assert metrics.success is False  # fake error propagates
         assert "fake-api-error" in metrics.error
+
+
+class TestResponsesEndpointSelection:
+    """Responses can use a project or gateway endpoint without breaking Completions."""
+
+    def test_project_endpoint_is_normalized_for_responses(self, monkeypatch):
+        import foundry_speedtest.adapters as adapters
+
+        monkeypatch.setenv("AZURE_FOUNDRY_ENDPOINT", "https://example.openai.azure.com/openai/v1")
+        monkeypatch.setenv(
+            "AZURE_FOUNDRY_PROJECT_ENDPOINT",
+            "https://example.services.ai.azure.com/api/projects/demo-project",
+        )
+        monkeypatch.delenv("AZURE_FOUNDRY_RESPONSES_TOKEN_SCOPE", raising=False)
+        monkeypatch.delenv("AZURE_FOUNDRY_TOKEN_SCOPE", raising=False)
+
+        settings = adapters._client_settings(responses=True)
+
+        assert settings.base_url == (
+            "https://example.services.ai.azure.com/api/projects/demo-project/openai/v1"
+        )
+        assert settings.token_scope == "https://ai.azure.com/.default"
+
+    def test_direct_endpoint_still_used_for_completions(self, monkeypatch):
+        import foundry_speedtest.adapters as adapters
+
+        monkeypatch.setenv("AZURE_FOUNDRY_ENDPOINT", "https://example.openai.azure.com/openai/v1")
+        monkeypatch.setenv(
+            "AZURE_FOUNDRY_PROJECT_ENDPOINT",
+            "https://example.services.ai.azure.com/api/projects/demo-project",
+        )
+        monkeypatch.delenv("AZURE_FOUNDRY_TOKEN_SCOPE", raising=False)
+
+        settings = adapters._client_settings(responses=False)
+
+        assert settings.base_url == "https://example.openai.azure.com/openai/v1"
+        assert settings.token_scope == "https://cognitiveservices.azure.com/.default"
+
+    def test_apim_gateway_key_defaults_to_query_parameter(self, monkeypatch):
+        import foundry_speedtest.adapters as adapters
+
+        monkeypatch.setenv(
+            "AZURE_FOUNDRY_RESPONSES_ENDPOINT",
+            "https://gateway.azure-api.net/resource/api/projects/project/openai/v1",
+        )
+        monkeypatch.setenv("APIM_SUBSCRIPTION_KEY", "secret-key")
+        monkeypatch.delenv("AZURE_FOUNDRY_GATEWAY_KEY_LOCATION", raising=False)
+
+        settings = adapters._client_settings(responses=True)
+
+        assert settings.base_url == "https://gateway.azure-api.net/resource/api/projects/project/openai/v1"
+        assert settings.default_query == {"subscription-key": "secret-key"}
+        assert settings.default_headers == {}

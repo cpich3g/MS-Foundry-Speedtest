@@ -206,6 +206,22 @@ cp .env.example .env
 # AZURE_FOUNDRY_ENDPOINT=https://<your-resource>.openai.azure.com/openai/v1
 ```
 
+If your Foundry project has **AI Gateway** enabled, keep
+`AZURE_FOUNDRY_ENDPOINT` for Chat Completions and add a Responses-specific
+project/gateway endpoint:
+
+```bash
+# Microsoft Learn project endpoint form; /openai/v1 is appended automatically
+AZURE_FOUNDRY_PROJECT_ENDPOINT=https://<your-resource>.services.ai.azure.com/api/projects/<project-name>
+
+# Or use the exact gateway/OpenAI v1 base URL
+AZURE_FOUNDRY_RESPONSES_ENDPOINT=https://<gateway-or-project-endpoint>/openai/v1
+```
+
+For APIM-backed gateway URLs that require a subscription key, set
+`AZURE_FOUNDRY_GATEWAY_SUBSCRIPTION_KEY` in your local `.env`. Never commit real
+subscription keys.
+
 ### 4. Authenticate
 
 ```bash

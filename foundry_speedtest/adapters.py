@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import os
 import time
-from typing import Generator
+from dataclasses import dataclass, field
+from urllib.parse import urlsplit, urlunsplit
 
 from dotenv import load_dotenv
 from openai import OpenAI
@@ -18,29 +19,162 @@ from .metrics import SingleRunMetrics
 # ---------------------------------------------------------------------------
 
 _client: OpenAI | None = None
+_responses_client: OpenAI | None = None
+_env_loaded = False
+
+DEFAULT_AZURE_OPENAI_SCOPE = "https://cognitiveservices.azure.com/.default"
+DEFAULT_FOUNDRY_SCOPE = "https://ai.azure.com/.default"
+
+
+@dataclass(frozen=True)
+class ClientSettings:
+    base_url: str
+    token_scope: str
+    default_headers: dict[str, str] = field(default_factory=dict)
+    default_query: dict[str, str] = field(default_factory=dict)
+
+
+def _load_environment() -> None:
+    global _env_loaded
+    if not _env_loaded:
+        load_dotenv(os.path.join(os.path.dirname(__file__), "..", "API", ".env"))
+        load_dotenv()  # also check cwd
+        _env_loaded = True
+
+
+def _env_first(*names: str) -> str | None:
+    for name in names:
+        value = os.getenv(name)
+        if value and value.strip():
+            return value.strip()
+    return None
+
+
+def _normalise_openai_v1_base_url(endpoint: str) -> str:
+    """Return a base URL that the OpenAI v1 client can append resources to."""
+    endpoint = endpoint.strip().rstrip("/")
+    parsed = urlsplit(endpoint)
+    path = parsed.path.rstrip("/")
+    lower_path = path.lower()
+    if lower_path.endswith("/openai/v1"):
+        normalised_path = path
+    elif lower_path.endswith("/openai"):
+        normalised_path = f"{path}/v1"
+    else:
+        normalised_path = f"{path}/openai/v1"
+    return urlunsplit((parsed.scheme, parsed.netloc, normalised_path, parsed.query, parsed.fragment))
+
+
+def _looks_like_project_or_gateway_endpoint(endpoint: str) -> bool:
+    parsed = urlsplit(endpoint)
+    host = parsed.netloc.lower()
+    path = parsed.path.lower()
+    return (
+        "/api/projects/" in path
+        or host.endswith(".services.ai.azure.com")
+        or host.endswith(".azure-api.net")
+    )
+
+
+def _gateway_subscription_key(endpoint: str) -> tuple[str | None, str]:
+    key = _env_first(
+        "AZURE_FOUNDRY_APIM_SUBSCRIPTION_KEY",
+        "AZURE_FOUNDRY_GATEWAY_SUBSCRIPTION_KEY",
+        "AZURE_FOUNDRY_GATEWAY_KEY",
+        "APIM_SUBSCRIPTION_KEY",
+    )
+    if not key:
+        return None, "header"
+
+    location = (_env_first("AZURE_FOUNDRY_GATEWAY_KEY_LOCATION") or "").lower()
+    if location in {"header", "query"}:
+        return key, location
+
+    # Foundry-managed APIM gateway URLs commonly validate the subscription key
+    # at the route-matching layer, where the query-string form is accepted.
+    return key, "query" if urlsplit(endpoint).netloc.lower().endswith(".azure-api.net") else "header"
+
+
+def _client_settings(*, responses: bool = False) -> ClientSettings:
+    _load_environment()
+
+    if responses:
+        endpoint = _env_first(
+            "AZURE_FOUNDRY_RESPONSES_ENDPOINT",
+            "AZURE_FOUNDRY_GATEWAY_ENDPOINT",
+            "AZURE_FOUNDRY_PROJECT_ENDPOINT",
+            "APIM_FOUNDRY_ENDPOINT",
+            "AZURE_FOUNDRY_ENDPOINT",
+            "OPENAI_BASE_URL",
+        )
+    else:
+        endpoint = _env_first("AZURE_FOUNDRY_ENDPOINT", "OPENAI_BASE_URL")
+
+    if not endpoint:
+        raise EnvironmentError(
+            "AZURE_FOUNDRY_ENDPOINT not set. Add it to your .env file."
+        )
+
+    base_url = _normalise_openai_v1_base_url(endpoint)
+    token_scope = _env_first(
+        "AZURE_FOUNDRY_RESPONSES_TOKEN_SCOPE" if responses else "AZURE_FOUNDRY_TOKEN_SCOPE",
+        "AZURE_FOUNDRY_TOKEN_SCOPE",
+    )
+    if not token_scope:
+        token_scope = (
+            DEFAULT_FOUNDRY_SCOPE
+            if responses and _looks_like_project_or_gateway_endpoint(base_url)
+            else DEFAULT_AZURE_OPENAI_SCOPE
+        )
+
+    default_headers: dict[str, str] = {}
+    default_query: dict[str, str] = {}
+    if responses:
+        subscription_key, location = _gateway_subscription_key(base_url)
+        if subscription_key and location == "query":
+            default_query["subscription-key"] = subscription_key
+        elif subscription_key:
+            default_headers["Ocp-Apim-Subscription-Key"] = subscription_key
+
+    return ClientSettings(
+        base_url=base_url,
+        token_scope=token_scope,
+        default_headers=default_headers,
+        default_query=default_query,
+    )
+
+
+def _build_client(settings: ClientSettings) -> OpenAI:
+    token_provider = get_bearer_token_provider(
+        DefaultAzureCredential(), settings.token_scope
+    )
+    return OpenAI(
+        base_url=settings.base_url,
+        api_key=token_provider,
+        default_headers=settings.default_headers or None,
+        default_query=settings.default_query or None,
+    )
 
 
 def _get_client() -> OpenAI:
     global _client
     if _client is None:
-        load_dotenv(os.path.join(os.path.dirname(__file__), "..", "API", ".env"))
-        load_dotenv()  # also check cwd
-        token_provider = get_bearer_token_provider(
-            DefaultAzureCredential(), "https://cognitiveservices.azure.com/.default"
-        )
-        endpoint = os.getenv("AZURE_FOUNDRY_ENDPOINT")
-        if not endpoint:
-            raise EnvironmentError(
-                "AZURE_FOUNDRY_ENDPOINT not set. Add it to your .env file."
-            )
-        _client = OpenAI(base_url=endpoint, api_key=token_provider)
+        _client = _build_client(_client_settings(responses=False))
     return _client
+
+
+def _get_responses_client() -> OpenAI:
+    global _responses_client
+    if _responses_client is None:
+        _responses_client = _build_client(_client_settings(responses=True))
+    return _responses_client
 
 
 def reset_client() -> None:
     """Force re-creation of the client (useful after env changes)."""
-    global _client
+    global _client, _responses_client
     _client = None
+    _responses_client = None
 
 
 # ---------------------------------------------------------------------------
@@ -241,7 +375,7 @@ def run_responses(
         streaming=stream,
     )
 
-    client = _get_client()
+    client = _get_responses_client()
     # o-series doesn't support streaming on some models
     if not caps.supports_streaming and stream:
         stream = False
