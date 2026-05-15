@@ -24,6 +24,7 @@ include = ["foundry_speedtest*"]
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0"]
+eval = ["azure-ai-evaluation>=1.16.0"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

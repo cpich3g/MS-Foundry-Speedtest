@@ -116,6 +116,14 @@ def export_raw_csv(
     fname = filename or f"benchmark_{model}_{ts}_raw.csv"
     path = _results_dir() / fname
 
+    # Discover all evaluator names across runs so we can produce stable columns.
+    eval_names: list[str] = []
+    for a in all_aggregates:
+        for r in a.runs:
+            for name in r.eval_scores.keys():
+                if name not in eval_names:
+                    eval_names.append(name)
+
     headers = [
         "api_type", "prompt_label", "streaming", "success", "error",
         "ttft", "total_time", "e2e_latency",
@@ -123,12 +131,15 @@ def export_raw_csv(
         "tokens_per_second", "cached_tokens", "is_cache_hit",
         "model_id", "finish_reason", "system_fingerprint",
     ]
+    for name in eval_names:
+        headers.extend([f"eval_{name}_score", f"eval_{name}_error"])
+
     with open(path, "w", newline="") as fh:
         writer = csv.DictWriter(fh, fieldnames=headers)
         writer.writeheader()
         for a in all_aggregates:
             for r in a.runs:
-                writer.writerow({
+                row = {
                     "api_type": r.api_type,
                     "prompt_label": r.prompt_label,
                     "streaming": r.streaming,
@@ -146,6 +157,12 @@ def export_raw_csv(
                     "model_id": r.model_id,
                     "finish_reason": r.finish_reason,
                     "system_fingerprint": r.system_fingerprint,
-                })
+                }
+                for name in eval_names:
+                    row[f"eval_{name}_score"] = (
+                        round(r.eval_scores[name], 3) if name in r.eval_scores else ""
+                    )
+                    row[f"eval_{name}_error"] = r.eval_errors.get(name, "")
+                writer.writerow(row)
 
     return str(path)

@@ -6,11 +6,14 @@ import concurrent.futures
 import time
 from dataclasses import dataclass, field
 from difflib import SequenceMatcher
-from typing import Callable
+from typing import TYPE_CHECKING, Callable
 
 from .adapters import run_completions, run_responses
 from .config import BENCHMARK_PROMPTS, CACHE_TEST_PROMPT, VARIABILITY_PROMPT, BenchmarkConfig
 from .metrics import AggregateMetrics, SingleRunMetrics
+
+if TYPE_CHECKING:  # avoid hard dep on optional eval extras
+    from .evaluation import EvaluatorRunner
 
 
 RunnerFn = Callable[..., SingleRunMetrics]
@@ -40,6 +43,39 @@ def _single_call(
     )
 
 
+def _attach_evaluations(
+    runs: list[SingleRunMetrics],
+    query: str,
+    evaluator_runner: "EvaluatorRunner | None",
+) -> None:
+    """Run the configured evaluators against each successful run's response.
+
+    Evaluation is best-effort: per-evaluator errors are recorded on the run
+    but never propagated. Failed runs (success=False) are skipped.
+    """
+    if evaluator_runner is None:
+        return
+    for r in runs:
+        r.query_text = query
+    items = [
+        (idx, query, r.response_text)
+        for idx, r in enumerate(runs)
+        if r.success and r.response_text
+    ]
+    if not items:
+        return
+    results = evaluator_runner.evaluate_many(items)
+    for idx, outcomes in results.items():
+        run = runs[idx]
+        for name, outcome in outcomes.items():
+            if outcome.score is not None:
+                run.eval_scores[name] = outcome.score
+            if outcome.reason:
+                run.eval_reasons[name] = outcome.reason
+            if outcome.error:
+                run.eval_errors[name] = outcome.error
+
+
 # ---------------------------------------------------------------------------
 # Per-prompt benchmark
 # ---------------------------------------------------------------------------
@@ -52,6 +88,7 @@ def benchmark_prompt(
     *,
     stream: bool,
     on_run: Callable[[int, SingleRunMetrics], None] | None = None,
+    evaluator_runner: "EvaluatorRunner | None" = None,
 ) -> AggregateMetrics:
     """Run N iterations of a single prompt and aggregate."""
     prompt = BENCHMARK_PROMPTS[prompt_key]
@@ -80,6 +117,9 @@ def benchmark_prompt(
         if on_run:
             on_run(i, m)
 
+    # Quality evaluation (opt-in, best-effort, parallelised internally)
+    _attach_evaluations(agg.runs, prompt["user"], evaluator_runner)
+
     return agg
 
 
@@ -93,6 +133,7 @@ def benchmark_cache(
     cfg: BenchmarkConfig,
     *,
     on_run: Callable[[int, SingleRunMetrics], None] | None = None,
+    evaluator_runner: "EvaluatorRunner | None" = None,
 ) -> AggregateMetrics:
     """Send the same prompt N times to observe caching behaviour."""
     runner = API_RUNNERS[api_type]
@@ -114,6 +155,7 @@ def benchmark_cache(
         if on_run:
             on_run(i, m)
 
+    _attach_evaluations(agg.runs, CACHE_TEST_PROMPT["user"], evaluator_runner)
     return agg
 
 

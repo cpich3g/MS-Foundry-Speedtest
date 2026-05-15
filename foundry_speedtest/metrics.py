@@ -42,8 +42,16 @@ class SingleRunMetrics:
     finish_reason: str = ""
     system_fingerprint: str = ""
 
-    # Response text (populated for variability tests)
+    # Response text (populated for variability tests + when eval is on)
     response_text: str = ""
+
+    # Original user query (populated when eval is on so the judge has context)
+    query_text: str = ""
+
+    # Per-evaluator results (populated only when --evaluate is on)
+    eval_scores: dict[str, float] = field(default_factory=dict)
+    eval_reasons: dict[str, str] = field(default_factory=dict)
+    eval_errors: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -120,8 +128,42 @@ class AggregateMetrics:
         vals = [r.output_tokens for r in self.successful_runs]
         return statistics.mean(vals) if vals else 0
 
-    def summary_dict(self) -> dict:
+    # --- evaluation aggregates ---------------------------------------------
+    def eval_evaluators(self) -> list[str]:
+        seen: list[str] = []
+        for r in self.runs:
+            for name in r.eval_scores.keys():
+                if name not in seen:
+                    seen.append(name)
+        return seen
+
+    def eval_score_stats(self, name: str) -> dict:
+        vals = [r.eval_scores[name] for r in self.runs if name in r.eval_scores]
+        if not vals:
+            return {"count": 0, "mean": 0.0, "min": 0.0, "max": 0.0, "median": 0.0}
         return {
+            "count": len(vals),
+            "mean": round(statistics.mean(vals), 3),
+            "min": round(min(vals), 3),
+            "max": round(max(vals), 3),
+            "median": round(statistics.median(vals), 3),
+        }
+
+    def eval_summary(self) -> dict[str, dict]:
+        return {name: self.eval_score_stats(name) for name in self.eval_evaluators()}
+
+    def eval_error_count(self, name: str | None = None) -> int:
+        if name is None:
+            return sum(
+                1
+                for r in self.runs
+                for n, msg in r.eval_errors.items()
+                if msg
+            )
+        return sum(1 for r in self.runs if name in r.eval_errors and r.eval_errors[name])
+
+    def summary_dict(self) -> dict:
+        d = {
             "api_type": self.api_type,
             "prompt_label": self.prompt_label,
             "streaming": self.streaming,
@@ -137,3 +179,7 @@ class AggregateMetrics:
             "cache_hit_rate": round(self.cache_hit_rate, 4),
             "total_cached_tokens": self.total_cached_tokens,
         }
+        eval_summary = self.eval_summary()
+        if eval_summary:
+            d["evaluation"] = eval_summary
+        return d

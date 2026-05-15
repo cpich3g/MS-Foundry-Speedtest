@@ -715,6 +715,167 @@ def _build_variability_panel(
 
 
 # ---------------------------------------------------------------------------
+# Quality / evaluation panels
+# ---------------------------------------------------------------------------
+
+
+def _color_eval_score(score: float) -> str:
+    """Score colouring for 1-5 evaluator scores: ≥4 good, ≥3 info, ≥2 warning, else bad."""
+    if score >= 4.0:
+        return f"[good]{score:.2f}[/good]"
+    if score >= 3.0:
+        return f"[info]{score:.2f}[/info]"
+    if score >= 2.0:
+        return f"[warning]{score:.2f}[/warning]"
+    return f"[bad]{score:.2f}[/bad]"
+
+
+def _build_quality_panel(
+    aggregates: list[AggregateMetrics],
+    title: str,
+) -> Panel | None:
+    """Per-prompt quality scores for one model. Returns None when no eval was run."""
+    evaluator_names: list[str] = []
+    for a in aggregates:
+        for name in a.eval_evaluators():
+            if name not in evaluator_names:
+                evaluator_names.append(name)
+    if not evaluator_names:
+        return None
+
+    table = Table(
+        title=title,
+        title_style=MATRIX_TITLE,
+        border_style=MATRIX_BORDER,
+        show_lines=True,
+        padding=(0, 1),
+    )
+    table.add_column("API", style="info", width=12)
+    table.add_column("Test", style="dim", min_width=20)
+    table.add_column("Stream", justify="center", width=6)
+    table.add_column("Scored", justify="right", width=7)
+    for name in evaluator_names:
+        table.add_column(name.title() + "\n(mean)", justify="right", width=11)
+
+    for a in aggregates:
+        eval_summary = a.eval_summary()
+        if not eval_summary:
+            continue
+        scored = sum(stat["count"] for stat in eval_summary.values())
+        scored_per_eval = max((stat["count"] for stat in eval_summary.values()), default=0)
+        cells = []
+        for name in evaluator_names:
+            stat = eval_summary.get(name)
+            if not stat or not stat["count"]:
+                cells.append("[dim]—[/dim]")
+                continue
+            cells.append(_color_eval_score(stat["mean"]))
+        table.add_row(
+            _api_tag(a.api_type),
+            a.prompt_label,
+            "✓" if a.streaming else "—",
+            str(scored_per_eval),
+            *cells,
+        )
+
+    note = Text.from_markup(
+        "\n  [dim]Scores are 1–5 from Azure AI Evaluation LLM-judge evaluators.[/dim]"
+        " [dim]Higher is better.[/dim]\n"
+    )
+    return Panel(Group(table, note), border_style=MATRIX_BORDER)
+
+
+def _build_quality_comparison_panel(
+    model_aggs: dict[str, list[AggregateMetrics]],
+) -> Panel | None:
+    """Side-by-side mean evaluator scores for compare()."""
+    evaluator_names: list[str] = []
+    for aggs in model_aggs.values():
+        for a in aggs:
+            for name in a.eval_evaluators():
+                if name not in evaluator_names:
+                    evaluator_names.append(name)
+    if not evaluator_names:
+        return None
+
+    table = Table(
+        title="✦ QUALITY COMPARISON (mean evaluator score, 1-5)",
+        title_style=MATRIX_TITLE,
+        border_style=MATRIX_BORDER,
+        show_lines=True,
+        padding=(0, 1),
+    )
+    table.add_column("Evaluator", style="info")
+    for model in model_aggs:
+        table.add_column(model, justify="right", style="metric")
+    table.add_column("Winner", justify="center")
+
+    for name in evaluator_names:
+        row_vals: dict[str, float | None] = {}
+        for model, aggs in model_aggs.items():
+            scores = []
+            for a in aggs:
+                for r in a.runs:
+                    if name in r.eval_scores:
+                        scores.append(r.eval_scores[name])
+            row_vals[model] = (sum(scores) / len(scores)) if scores else None
+
+        cells = []
+        valid = {m: v for m, v in row_vals.items() if v is not None}
+        winner = max(valid, key=valid.get) if valid else None
+        for model in model_aggs:
+            v = row_vals[model]
+            if v is None:
+                cells.append("[dim]—[/dim]")
+            else:
+                cells.append(_color_eval_score(v))
+        winner_cell = f"[good]{winner}[/good]" if winner else "[dim]—[/dim]"
+        table.add_row(name.title(), *cells, winner_cell)
+
+    return Panel(table, border_style=MATRIX_BORDER)
+
+
+def _build_evaluator_runner(
+    *,
+    evaluate: bool,
+    evaluators: str | None,
+    judge_model: str,
+    judge_endpoint: str | None,
+    judge_key: str | None,
+    eval_workers: int,
+):
+    """Construct an EvaluatorRunner from CLI args. Returns None if evaluation is off.
+
+    Falls back to env vars (AZURE_FOUNDRY_ENDPOINT, FOUNDRY_SPEEDTEST_JUDGE_*) for
+    any value not explicitly provided. Raises a friendly error if eval is on but
+    azure-ai-evaluation isn't installed.
+    """
+    if not evaluate and not evaluators:
+        return None
+    try:
+        from .evaluation import DEFAULT_EVALUATORS, EvaluationConfig, EvaluatorRunner
+    except ImportError as exc:
+        raise SystemExit(
+            "Evaluation requested but azure-ai-evaluation is not installed. "
+            "Install with: pip install -e .[eval]"
+        ) from exc
+
+    chosen = (
+        tuple(name.strip().lower() for name in evaluators.split(",") if name.strip())
+        if evaluators
+        else DEFAULT_EVALUATORS
+    )
+    cfg = EvaluationConfig.from_env(
+        judge_model=judge_model,
+        judge_endpoint=judge_endpoint,
+        judge_api_key=judge_key,
+        evaluators=chosen,
+        max_workers=eval_workers,
+    )
+    return EvaluatorRunner(cfg)
+
+
+# ---------------------------------------------------------------------------
 # CLI commands
 # ---------------------------------------------------------------------------
 
@@ -735,22 +896,34 @@ class FoundrySpeedTest:
         prompts: str = "all",
         timeout: float = 120.0,
         output: str = "all",
+        evaluate: bool = False,
+        evaluators: str | None = None,
+        judge_model: str = "gpt-4.1",
+        judge_endpoint: str | None = None,
+        judge_key: str | None = None,
+        eval_workers: int = 4,
     ):
         """
         Run the full benchmark suite.
 
         Args:
-            model:        Model deployment name (e.g. gpt-4.1-nano, gpt-5.2)
-            iterations:   Number of measured runs per prompt/api combo
-            warmup:       Warmup runs before measuring (discarded)
-            max_tokens:   Max output tokens per request
-            temperature:  Sampling temperature
-            concurrency:  Concurrent requests for throughput test
-            cache_rounds: Number of identical calls for cache test
-            apis:         Which APIs to test: 'both', 'completions', or 'responses'
-            prompts:      Prompt set: 'all' or comma-separated keys (short,medium,long,code,reasoning)
-            timeout:      Request timeout in seconds
-            output:       Export format: 'all', 'json', 'csv', or 'none'
+            model:           Model deployment name (e.g. gpt-4.1-nano, gpt-5.2)
+            iterations:      Number of measured runs per prompt/api combo
+            warmup:          Warmup runs before measuring (discarded)
+            max_tokens:      Max output tokens per request
+            temperature:     Sampling temperature
+            concurrency:     Concurrent requests for throughput test
+            cache_rounds:    Number of identical calls for cache test
+            apis:            Which APIs to test: 'both', 'completions', or 'responses'
+            prompts:         Prompt set: 'all' or comma-separated keys (short,medium,long,code,reasoning)
+            timeout:         Request timeout in seconds
+            output:          Export format: 'all', 'json', 'csv', or 'none'
+            evaluate:        Run quality evaluation (requires `pip install -e .[eval]`)
+            evaluators:      Comma-separated evaluator names (default: relevance,coherence,fluency)
+            judge_model:     LLM-judge deployment (default: gpt-4.1)
+            judge_endpoint:  Judge endpoint URL (defaults to AZURE_FOUNDRY_ENDPOINT)
+            judge_key:       Judge API key (default: AAD via DefaultAzureCredential)
+            eval_workers:    Parallel judge calls (default: 4)
         """
         _show_banner()
 
@@ -769,6 +942,15 @@ class FoundrySpeedTest:
             cfg.prompt_keys = [k.strip() for k in prompts.split(",")]
 
         api_list = ["completions", "responses"] if apis == "both" else [apis]
+
+        evaluator_runner = _build_evaluator_runner(
+            evaluate=evaluate,
+            evaluators=evaluators,
+            judge_model=judge_model,
+            judge_endpoint=judge_endpoint,
+            judge_key=judge_key,
+            eval_workers=eval_workers,
+        )
 
         # Count total work items
         prompt_tests = len(cfg.prompt_keys) * len(api_list) * 2  # stream + non-stream
@@ -855,7 +1037,11 @@ class FoundrySpeedTest:
                         current_phase = f"{api_type} · {label} ({mode})"
                         _refresh()
 
-                        agg = benchmark_prompt(api_type, prompt_key, cfg, stream=stream)
+                        agg = benchmark_prompt(
+                            api_type, prompt_key, cfg,
+                            stream=stream,
+                            evaluator_runner=evaluator_runner,
+                        )
                         all_aggregates.append(agg)
                         all_runs.extend(agg.runs)
                         completed_count += 1
@@ -867,7 +1053,10 @@ class FoundrySpeedTest:
                 current_phase = f"{api_type} · Cache warm/cold"
                 _refresh()
 
-                agg = benchmark_cache(api_type, cfg)
+                agg = benchmark_cache(
+                    api_type, cfg,
+                    evaluator_runner=evaluator_runner,
+                )
                 all_aggregates.append(agg)
                 all_runs.extend(agg.runs)
                 completed_count += 1
@@ -937,6 +1126,13 @@ class FoundrySpeedTest:
             console.print(_build_comparison_panel(c_aggs, r_aggs))
             console.print()
 
+        # Quality / evaluator scores
+        if evaluator_runner is not None:
+            quality_panel = _build_quality_panel(all_aggregates, f"✦ QUALITY SCORES — {model}")
+            if quality_panel:
+                console.print(quality_panel)
+                console.print()
+
         # Variability results
         if variability_results:
             console.print(_build_variability_panel(variability_results))
@@ -998,20 +1194,41 @@ class FoundrySpeedTest:
         iterations: int = 3,
         max_tokens: int = 512,
         timeout: float = 120.0,
+        evaluate: bool = False,
+        evaluators: str | None = None,
+        judge_model: str = "gpt-4.1",
+        judge_endpoint: str | None = None,
+        judge_key: str | None = None,
+        eval_workers: int = 4,
     ):
         """
         Compare two models head-to-head.
 
         Args:
-            model1:     First model deployment name
-            model2:     Second model deployment name
-            iterations: Runs per test
-            max_tokens: Max output tokens
-            timeout:    Request timeout
+            model1:          First model deployment name
+            model2:          Second model deployment name
+            iterations:      Runs per test
+            max_tokens:      Max output tokens
+            timeout:         Request timeout
+            evaluate:        Run quality evaluation (requires `pip install -e .[eval]`)
+            evaluators:      Comma-separated evaluator names (default: relevance,coherence,fluency)
+            judge_model:     LLM-judge deployment (default: gpt-4.1)
+            judge_endpoint:  Judge endpoint URL (defaults to AZURE_FOUNDRY_ENDPOINT)
+            judge_key:       Judge API key (default: AAD via DefaultAzureCredential)
+            eval_workers:    Parallel judge calls (default: 4)
         """
         _show_banner()
         console.print(f"  [info]Comparing[/info] [bold]{model1}[/bold] [info]vs[/info] [bold]{model2}[/bold]")
         console.print()
+
+        evaluator_runner = _build_evaluator_runner(
+            evaluate=evaluate,
+            evaluators=evaluators,
+            judge_model=judge_model,
+            judge_endpoint=judge_endpoint,
+            judge_key=judge_key,
+            eval_workers=eval_workers,
+        )
 
         all_aggs: dict[str, list[AggregateMetrics]] = {model1: [], model2: []}
 
@@ -1029,7 +1246,11 @@ class FoundrySpeedTest:
                 for api_type in ("completions", "responses"):
                     for prompt_key in cfg.prompt_keys:
                         for stream in (True, False):
-                            agg = benchmark_prompt(api_type, prompt_key, cfg, stream=stream)
+                            agg = benchmark_prompt(
+                                api_type, prompt_key, cfg,
+                                stream=stream,
+                                evaluator_runner=evaluator_runner,
+                            )
                             all_aggs[mdl].append(agg)
 
         for mdl in (model1, model2):
@@ -1072,6 +1293,13 @@ class FoundrySpeedTest:
 
         console.print(Panel(cmp_table, border_style=MATRIX_BORDER))
         console.print()
+
+        if evaluator_runner is not None:
+            quality_panel = _build_quality_comparison_panel(all_aggs)
+            if quality_panel:
+                console.print(quality_panel)
+                console.print()
+
         console.print("[bold bright_green]░▒▓ Comparison complete. ▓▒░[/bold bright_green]")
 
     def list_prompts(self):
