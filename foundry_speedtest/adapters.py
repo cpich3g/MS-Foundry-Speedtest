@@ -76,23 +76,33 @@ def _looks_like_project_or_gateway_endpoint(endpoint: str) -> bool:
     )
 
 
-def _gateway_subscription_key(endpoint: str) -> tuple[str | None, str]:
+def _gateway_subscription_key(endpoint: str) -> tuple[str | None, str, str]:
+    """Resolve the APIM subscription key, location, and header name.
+
+    Returns ``(key, location, header_name)`` where ``location`` is ``"header"`` or
+    ``"query"``. ``header_name`` is only meaningful when ``location == "header"``;
+    Foundry-imported APIs typically use ``api-key`` (matching Azure OpenAI), but
+    APIM's platform default is ``Ocp-Apim-Subscription-Key`` and is configurable
+    per-API. Override with ``AZURE_FOUNDRY_GATEWAY_KEY_HEADER`` if needed.
+    """
     key = _env_first(
         "AZURE_FOUNDRY_APIM_SUBSCRIPTION_KEY",
         "AZURE_FOUNDRY_GATEWAY_SUBSCRIPTION_KEY",
         "AZURE_FOUNDRY_GATEWAY_KEY",
         "APIM_SUBSCRIPTION_KEY",
     )
+    header_name = _env_first("AZURE_FOUNDRY_GATEWAY_KEY_HEADER") or "api-key"
     if not key:
-        return None, "header"
+        return None, "header", header_name
 
     location = (_env_first("AZURE_FOUNDRY_GATEWAY_KEY_LOCATION") or "").lower()
     if location in {"header", "query"}:
-        return key, location
+        return key, location, header_name
 
     # Foundry-managed APIM gateway URLs commonly validate the subscription key
     # at the route-matching layer, where the query-string form is accepted.
-    return key, "query" if urlsplit(endpoint).netloc.lower().endswith(".azure-api.net") else "header"
+    chosen = "query" if urlsplit(endpoint).netloc.lower().endswith(".azure-api.net") else "header"
+    return key, chosen, header_name
 
 
 def _client_settings(*, responses: bool = False) -> ClientSettings:
@@ -130,11 +140,11 @@ def _client_settings(*, responses: bool = False) -> ClientSettings:
     default_headers: dict[str, str] = {}
     default_query: dict[str, str] = {}
     if responses:
-        subscription_key, location = _gateway_subscription_key(base_url)
+        subscription_key, location, header_name = _gateway_subscription_key(base_url)
         if subscription_key and location == "query":
             default_query["subscription-key"] = subscription_key
         elif subscription_key:
-            default_headers["Ocp-Apim-Subscription-Key"] = subscription_key
+            default_headers[header_name] = subscription_key
 
     return ClientSettings(
         base_url=base_url,

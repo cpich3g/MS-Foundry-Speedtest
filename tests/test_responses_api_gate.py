@@ -100,6 +100,10 @@ class TestResponsesEndpointSelection:
     def test_project_endpoint_is_normalized_for_responses(self, monkeypatch):
         import foundry_speedtest.adapters as adapters
 
+        monkeypatch.setattr(adapters, "_env_loaded", True, raising=False)
+        monkeypatch.delenv("AZURE_FOUNDRY_RESPONSES_ENDPOINT", raising=False)
+        monkeypatch.delenv("AZURE_FOUNDRY_GATEWAY_ENDPOINT", raising=False)
+        monkeypatch.delenv("APIM_FOUNDRY_ENDPOINT", raising=False)
         monkeypatch.setenv("AZURE_FOUNDRY_ENDPOINT", "https://example.openai.azure.com/openai/v1")
         monkeypatch.setenv(
             "AZURE_FOUNDRY_PROJECT_ENDPOINT",
@@ -118,6 +122,7 @@ class TestResponsesEndpointSelection:
     def test_direct_endpoint_still_used_for_completions(self, monkeypatch):
         import foundry_speedtest.adapters as adapters
 
+        monkeypatch.setattr(adapters, "_env_loaded", True, raising=False)
         monkeypatch.setenv("AZURE_FOUNDRY_ENDPOINT", "https://example.openai.azure.com/openai/v1")
         monkeypatch.setenv(
             "AZURE_FOUNDRY_PROJECT_ENDPOINT",
@@ -133,10 +138,17 @@ class TestResponsesEndpointSelection:
     def test_apim_gateway_key_defaults_to_query_parameter(self, monkeypatch):
         import foundry_speedtest.adapters as adapters
 
+        monkeypatch.setattr(adapters, "_env_loaded", True, raising=False)
         monkeypatch.setenv(
             "AZURE_FOUNDRY_RESPONSES_ENDPOINT",
             "https://gateway.azure-api.net/resource/api/projects/project/openai/v1",
         )
+        for higher in (
+            "AZURE_FOUNDRY_APIM_SUBSCRIPTION_KEY",
+            "AZURE_FOUNDRY_GATEWAY_SUBSCRIPTION_KEY",
+            "AZURE_FOUNDRY_GATEWAY_KEY",
+        ):
+            monkeypatch.delenv(higher, raising=False)
         monkeypatch.setenv("APIM_SUBSCRIPTION_KEY", "secret-key")
         monkeypatch.delenv("AZURE_FOUNDRY_GATEWAY_KEY_LOCATION", raising=False)
 
